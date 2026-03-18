@@ -1,0 +1,321 @@
+/* ─── 공통 ─────────────────────────────────── */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Segoe UI', -apple-system, system-ui, sans-serif;
+  background: #0f0f0f;
+  color: #fff;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* ─── 타이틀바 ─────────────────────────────── */
+#titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  background: #0f0f0f;
+  -webkit-app-region: drag;
+  padding: 0 4px;
+  border-bottom: 1px solid #222;
+}
+
+.titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 8px;
+}
+
+.app-icon {
+  display: flex;
+  align-items: center;
+}
+
+.app-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: -0.2px;
+}
+
+.titlebar-center {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-right {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  -webkit-app-region: no-drag;
+}
+
+/* ─── 네비게이션 버튼 ──────────────────────── */
+.nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: #aaa;
+  cursor: pointer;
+  border-radius: 4px;
+  -webkit-app-region: no-drag;
+  transition: background 0.1s, color 0.1s;
+}
+
+.nav-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+}
+
+.nav-btn:active {
+  background: rgba(255,255,255,0.15);
+}
+
+/* ─── 윈도우 컨트롤 버튼 ──────────────────── */
+.win-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  color: #aaa;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: background 0.1s;
+}
+
+.win-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+}
+
+.win-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+/* ─── 가사 사이드 패널 ────────────────────── */
+.lyrics-panel {
+  position: fixed;
+  top: 36px;
+  right: 0;
+  width: 320px;
+  height: calc(100vh - 36px);
+  background: #0f0f0f;
+  border-left: 1px solid #222;
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+  transition: transform 0.25s ease;
+}
+
+.lyrics-panel.hidden {
+  transform: translateX(100%);
+  pointer-events: none;
+}
+
+.lyrics-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px 8px;
+  flex-shrink: 0;
+}
+
+.lyrics-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.3px;
+}
+
+.lyrics-source {
+  font-size: 10px;
+  color: #666;
+}
+
+.lyrics-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 16px 24px;
+  scroll-behavior: smooth;
+}
+
+.lyrics-body::-webkit-scrollbar { width: 4px; }
+.lyrics-body::-webkit-scrollbar-track { background: transparent; }
+.lyrics-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+.lyrics-body:hover::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); }
+
+.lyrics-placeholder {
+  color: #555;
+  font-size: 13px;
+  text-align: center;
+  padding-top: 40px;
+}
+
+.lyrics-line {
+  padding: 5px 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: rgba(255,255,255,0.35);
+  transition: color 0.3s, font-size 0.3s;
+  cursor: default;
+}
+
+.lyrics-line[data-time] {
+  cursor: pointer;
+}
+
+.lyrics-line[data-time]:hover {
+  color: rgba(255,255,255,0.7);
+}
+
+.lyrics-line.active {
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.lyrics-line.past {
+  color: rgba(255,255,255,0.5);
+}
+
+.nav-btn.active {
+  color: #FF0000;
+}
+
+/* ─── 미니 플레이어 ────────────────────────── */
+.mini-player {
+  width: 380px;
+  height: 90px;
+  background: #212121;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px 8px;
+  -webkit-app-region: drag;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+  border: 1px solid #333;
+}
+
+.mini-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.mini-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  background: #333;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.mini-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.mini-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mini-title {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #fff;
+}
+
+.mini-artist {
+  font-size: 11px;
+  color: #aaa;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mini-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+}
+
+.mini-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: #ccc;
+  cursor: pointer;
+  border-radius: 50%;
+  transition: background 0.1s, color 0.1s;
+  -webkit-app-region: no-drag;
+}
+
+.mini-btn:hover {
+  background: rgba(255,255,255,0.12);
+  color: #fff;
+}
+
+.mini-btn.play-pause {
+  width: 32px;
+  height: 32px;
+  color: #fff;
+}
+
+.mini-btn.play-pause:hover {
+  background: rgba(255,255,255,0.2);
+}
+
+.mini-btn.close-btn:hover {
+  color: #e81123;
+}
+
+/* ─── 프로그레스 바 ────────────────────────── */
+.mini-progress {
+  width: 100%;
+  height: 3px;
+  background: #444;
+  border-radius: 2px;
+  margin-top: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.mini-progress-fill {
+  height: 100%;
+  background: #FF0000;
+  border-radius: 2px;
+  width: 0%;
+  transition: width 0.3s linear;
+}

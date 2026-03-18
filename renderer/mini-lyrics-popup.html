@@ -1,0 +1,1469 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>Popup</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      background: transparent;
+      overflow: hidden;
+      font-family: 'Segoe UI', -apple-system, system-ui, sans-serif;
+      user-select: none;
+    }
+
+    .popup {
+      width: 360px;
+      height: 320px;
+      background: rgba(18, 18, 18, 0.92);
+      backdrop-filter: blur(28px);
+      -webkit-backdrop-filter: blur(28px);
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.07);
+      box-shadow: 0 6px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,0,0,0.3);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      cursor: default;
+    }
+
+    /* ─── 탭 바 (아이콘) ─── */
+    .tab-bar {
+      display: flex;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      flex-shrink: 0;
+    }
+    .tab-btn {
+      flex: 1;
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.25);
+      padding: 7px 0 5px;
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s;
+      border-bottom: 2px solid transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .tab-btn svg { width: 15px; height: 15px; fill: currentColor; }
+    .tab-btn:hover { color: rgba(255,255,255,0.55); }
+    .tab-btn.active { color: #fff; border-bottom-color: #ff4444; }
+
+    /* ─── 탭 콘텐츠 ─── */
+    .tab-content {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      overflow: hidden;
+      min-height: 0;
+    }
+    .tab-content.active { display: flex; }
+
+    /* ─── 가사 ─── */
+    .lyrics-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 12px;
+      scroll-behavior: smooth;
+    }
+    .lyrics-body::-webkit-scrollbar { width: 3px; }
+    .lyrics-body::-webkit-scrollbar-track { background: transparent; }
+    .lyrics-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+    .lyrics-line {
+      padding: 3px 0;
+      font-size: 12px;
+      line-height: 1.6;
+      color: rgba(255,255,255,0.35);
+      transition: color 0.3s;
+      text-align: center;
+    }
+    .lyrics-line.active { color: #fff; font-weight: 600; font-size: 13px; }
+    .lyrics-line.past { color: rgba(255,255,255,0.45); }
+    .lyrics-line[data-time] { cursor: pointer; }
+    .lyrics-line[data-time]:hover { color: rgba(255,255,255,0.7); }
+    .lyrics-placeholder {
+      color: rgba(255,255,255,0.25);
+      font-size: 11px;
+      text-align: center;
+      padding-top: 60px;
+    }
+
+    /* ─── 싱크 조절 바 ─── */
+    .sync-bar {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      flex-shrink: 0;
+    }
+    .sync-bar.visible { display: flex; }
+    .sync-btn {
+      background: rgba(255,255,255,0.08);
+      border: none;
+      color: rgba(255,255,255,0.5);
+      font-size: 10px;
+      font-family: inherit;
+      padding: 2px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .sync-btn:hover { background: rgba(255,255,255,0.15); color: rgba(255,255,255,0.8); }
+    .sync-label {
+      font-size: 9px;
+      color: rgba(255,255,255,0.35);
+      min-width: 52px;
+      text-align: center;
+      cursor: pointer;
+    }
+    .sync-label:hover { color: rgba(255,255,255,0.6); }
+    .sync-label.adjusted { color: #ff9944; }
+
+    /* ─── 히스토리 ─── */
+    .history-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 12px;
+    }
+    .history-list::-webkit-scrollbar { width: 3px; }
+    .history-list::-webkit-scrollbar-track { background: transparent; }
+    .history-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+    .history-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 6px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .history-item:hover { background: rgba(255,255,255,0.08); }
+    .history-item-info { flex: 1; min-width: 0; overflow: hidden; }
+    .history-item-title {
+      font-size: 11px;
+      color: rgba(255,255,255,0.75);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .history-item-artist {
+      font-size: 9px;
+      color: rgba(255,255,255,0.35);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .history-item-time {
+      font-size: 8px;
+      color: rgba(255,255,255,0.2);
+      flex-shrink: 0;
+    }
+    .history-empty {
+      font-size: 11px;
+      color: rgba(255,255,255,0.2);
+      text-align: center;
+      padding-top: 60px;
+    }
+
+    /* ─── 검색 ─── */
+    .search-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 8px;
+      padding: 5px 10px;
+      margin: 8px 12px 6px;
+      flex-shrink: 0;
+    }
+    .search-wrap svg { flex-shrink: 0; color: rgba(255,255,255,0.3); }
+    .search-input {
+      flex: 1;
+      background: none;
+      border: none;
+      outline: none;
+      color: #fff;
+      font-size: 11px;
+      font-family: inherit;
+    }
+    .search-input::placeholder { color: rgba(255,255,255,0.25); }
+    .search-clear {
+      display: none;
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.3);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 0 2px;
+    }
+    .search-results {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 12px 8px;
+    }
+    .search-results::-webkit-scrollbar { width: 3px; }
+    .search-results::-webkit-scrollbar-track { background: transparent; }
+    .search-results::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+    .search-item {
+      display: flex;
+      gap: 8px;
+      padding: 5px 4px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .search-item:hover { background: rgba(255,255,255,0.08); }
+    .search-item-thumb {
+      width: 40px;
+      height: 40px;
+      border-radius: 4px;
+      overflow: hidden;
+      flex-shrink: 0;
+      background: rgba(255,255,255,0.05);
+    }
+    .search-item-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .search-item-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+    .search-item-title {
+      font-size: 11px;
+      color: rgba(255,255,255,0.8);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .search-item-meta {
+      font-size: 9px;
+      color: rgba(255,255,255,0.35);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .search-mode-toggle {
+      display: flex;
+      gap: 0;
+      margin: 0 12px 4px;
+      flex-shrink: 0;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .search-mode-btn {
+      flex: 1;
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.3);
+      font-size: 10px;
+      font-family: inherit;
+      padding: 3px 0;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .search-mode-btn:hover { color: rgba(255,255,255,0.5); }
+    .search-mode-btn.active {
+      background: rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.8);
+    }
+    .search-item-badge {
+      font-size: 8px;
+      color: rgba(255,255,255,0.3);
+      background: rgba(255,255,255,0.06);
+      padding: 1px 4px;
+      border-radius: 3px;
+      margin-left: 4px;
+      flex-shrink: 0;
+    }
+    .search-empty, .search-loading {
+      font-size: 11px;
+      color: rgba(255,255,255,0.2);
+      text-align: center;
+      padding-top: 40px;
+    }
+    .playlist-detail-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      flex-shrink: 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .playlist-back {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.4);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 2px 4px;
+      line-height: 1;
+    }
+    .playlist-back:hover { color: rgba(255,255,255,0.8); }
+    .playlist-detail-title {
+      font-size: 10px;
+      color: rgba(255,255,255,0.6);
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .playlist-play-all {
+      background: rgba(255,255,255,0.08);
+      border: none;
+      color: rgba(255,255,255,0.5);
+      cursor: pointer;
+      font-size: 9px;
+      font-family: inherit;
+      padding: 2px 8px;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+    .playlist-play-all:hover { background: rgba(255,255,255,0.15); color: rgba(255,255,255,0.8); }
+
+    /* ─── 플레이리스트 패널 ─── */
+    .queue-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 8px 8px;
+    }
+    .queue-list::-webkit-scrollbar { width: 3px; }
+    .queue-list::-webkit-scrollbar-track { background: transparent; }
+    .queue-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+    .queue-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 6px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .queue-item:hover { background: rgba(255,255,255,0.08); }
+    .queue-item.now-playing { background: rgba(255,68,68,0.12); }
+    .queue-item-idx {
+      font-size: 9px;
+      color: rgba(255,255,255,0.2);
+      width: 18px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    .queue-item.now-playing .queue-item-idx { color: #ff4444; }
+    .queue-item-info { flex: 1; min-width: 0; overflow: hidden; }
+    .queue-item-title {
+      font-size: 11px;
+      color: rgba(255,255,255,0.7);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .queue-item.now-playing .queue-item-title { color: #fff; font-weight: 600; }
+    .queue-item-artist {
+      font-size: 9px;
+      color: rgba(255,255,255,0.3);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .queue-item-dur {
+      font-size: 8px;
+      color: rgba(255,255,255,0.2);
+      flex-shrink: 0;
+    }
+    .queue-empty {
+      font-size: 11px;
+      color: rgba(255,255,255,0.2);
+      text-align: center;
+      padding-top: 60px;
+    }
+    .queue-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px 4px;
+      flex-shrink: 0;
+      position: relative;
+    }
+    .queue-header-title {
+      font-size: 10px;
+      color: rgba(255,255,255,0.45);
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .queue-header-count {
+      font-size: 9px;
+      color: rgba(255,255,255,0.25);
+      flex-shrink: 0;
+    }
+    .queue-clear-btn {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.2);
+      cursor: pointer;
+      font-size: 10px;
+      padding: 2px 4px;
+      flex-shrink: 0;
+      transition: color 0.15s;
+    }
+    .queue-clear-btn:hover { color: rgba(255,255,255,0.6); }
+    .queue-item-remove {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.15);
+      cursor: pointer;
+      font-size: 12px;
+      padding: 2px 4px;
+      flex-shrink: 0;
+      opacity: 0;
+      transition: opacity 0.15s, color 0.15s;
+    }
+    .queue-item:hover .queue-item-remove { opacity: 1; }
+    .queue-item-remove:hover { color: #ff4444; }
+    .search-item-add {
+      background: none;
+      border: 1px solid rgba(255,255,255,0.15);
+      color: rgba(255,255,255,0.4);
+      cursor: pointer;
+      font-size: 14px;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: all 0.15s;
+      line-height: 1;
+    }
+    .search-item-add:hover { border-color: rgba(255,255,255,0.4); color: #fff; background: rgba(255,255,255,0.1); }
+    .search-item-add.added { border-color: #ff4444; color: #ff4444; pointer-events: none; }
+    .queue-active-badge {
+      font-size: 8px;
+      color: #ff4444;
+      background: rgba(255,68,68,0.15);
+      padding: 1px 5px;
+      border-radius: 3px;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+    .queue-active-badge.off { color: rgba(255,255,255,0.3); background: rgba(255,255,255,0.06); }
+
+    /* ─── 재생목록 헤더 버튼 ─── */
+    .queue-add-pl-btn,
+    .queue-more-btn {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.25);
+      cursor: pointer;
+      width: 22px;
+      height: 22px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      padding: 0;
+      transition: color 0.15s, background 0.15s;
+    }
+    .queue-add-pl-btn:hover,
+    .queue-more-btn:hover {
+      color: rgba(255,255,255,0.7);
+      background: rgba(255,255,255,0.08);
+    }
+    .queue-add-pl-btn svg,
+    .queue-more-btn svg {
+      width: 14px;
+      height: 14px;
+      fill: currentColor;
+    }
+
+    /* ─── 재생목록 드롭다운 ─── */
+    .pl-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      min-width: 200px;
+      max-width: 280px;
+      background: rgba(30,30,30,0.98);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+      z-index: 100;
+      padding: 4px 0;
+      display: none;
+    }
+    .pl-dropdown.show { display: block; }
+    .pl-dropdown-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      cursor: pointer;
+      font-size: 11px;
+      color: rgba(255,255,255,0.6);
+      transition: background 0.1s;
+    }
+    .pl-dropdown-item:hover { background: rgba(255,255,255,0.08); }
+    .pl-dropdown-item.active { color: #fff; }
+    .pl-dropdown-item .pl-check { width: 14px; flex-shrink: 0; font-size: 10px; }
+    .pl-dropdown-item .pl-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pl-dropdown-item .pl-count { font-size: 9px; color: rgba(255,255,255,0.25); flex-shrink: 0; }
+    .pl-dropdown-sep { height: 1px; background: rgba(255,255,255,0.06); margin: 3px 0; }
+
+    /* ─── 더보기 메뉴 ─── */
+    .pl-menu {
+      position: fixed;
+      min-width: 130px;
+      background: rgba(30,30,30,0.98);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+      z-index: 200;
+      padding: 4px 0;
+      display: none;
+    }
+    .pl-menu.show { display: block; }
+    .pl-menu-item {
+      padding: 5px 12px;
+      cursor: pointer;
+      font-size: 11px;
+      color: rgba(255,255,255,0.6);
+      transition: background 0.1s;
+    }
+    .pl-menu-item:hover { background: rgba(255,255,255,0.08); }
+    .pl-menu-item.danger { color: #ff4444; }
+    .pl-menu-sep { height: 1px; background: rgba(255,255,255,0.06); margin: 3px 0; }
+
+    /* ─── 인라인 이름 편집 ─── */
+    .pl-name-input {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 4px;
+      color: #fff;
+      font-size: 10px;
+      font-family: inherit;
+      padding: 2px 6px;
+      outline: none;
+      width: 100%;
+    }
+
+    /* ─── 토스트 ─── */
+    .toast {
+      position: fixed;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%) translateY(40px);
+      background: rgba(255,255,255,0.12);
+      color: rgba(255,255,255,0.8);
+      font-size: 10px;
+      padding: 4px 12px;
+      border-radius: 6px;
+      opacity: 0;
+      transition: transform 0.25s, opacity 0.25s;
+      pointer-events: none;
+      z-index: 300;
+      white-space: nowrap;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* ─── 커스텀 확인 모달 ─── */
+    .confirm-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      z-index: 500;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .confirm-overlay.show { display: flex; }
+    .confirm-box {
+      background: rgba(30,30,30,0.98);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+      padding: 20px;
+      width: 260px;
+      text-align: center;
+    }
+    .confirm-msg {
+      font-size: 12px;
+      color: rgba(255,255,255,0.75);
+      line-height: 1.5;
+      margin-bottom: 18px;
+    }
+    .confirm-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+    }
+    .confirm-btn {
+      flex: 1;
+      padding: 6px 0;
+      border-radius: 6px;
+      border: none;
+      font-size: 11px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .confirm-btn.cancel {
+      background: rgba(255,255,255,0.08);
+      color: rgba(255,255,255,0.5);
+    }
+    .confirm-btn.cancel:hover {
+      background: rgba(255,255,255,0.12);
+      color: rgba(255,255,255,0.7);
+    }
+    .confirm-btn.ok {
+      background: rgba(255,68,68,0.15);
+      color: #ff4444;
+    }
+    .confirm-btn.ok:hover {
+      background: rgba(255,68,68,0.25);
+    }
+
+    /* ─── 곡 순서 변경 버튼 ─── */
+    .queue-item-move {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.1);
+      cursor: pointer;
+      font-size: 10px;
+      padding: 1px 3px;
+      flex-shrink: 0;
+      opacity: 0;
+      transition: opacity 0.15s, color 0.15s;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      line-height: 1;
+    }
+    .queue-item:hover .queue-item-move { opacity: 1; }
+    .queue-item-move span { cursor: pointer; }
+    .queue-item-move span:hover { color: rgba(255,255,255,0.7); }
+  </style>
+</head>
+<body>
+  <div class="popup">
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="lyrics" title="가사">
+        <svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+      </button>
+      <button class="tab-btn" data-tab="queue" title="재생목록">
+        <svg viewBox="0 0 24 24"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z"/></svg>
+      </button>
+      <button class="tab-btn" data-tab="favorites" title="즐겨찾기">
+        <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+      </button>
+      <button class="tab-btn" data-tab="history" title="최근 재생">
+        <svg viewBox="0 0 24 24"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+      </button>
+      <button class="tab-btn" data-tab="search" title="검색">
+        <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+      </button>
+    </div>
+
+    <!-- 가사 탭 -->
+    <div class="tab-content active" id="tab-lyrics">
+      <div class="lyrics-body" id="lyrics-body">
+        <div class="lyrics-placeholder">가사 없음</div>
+      </div>
+      <div class="sync-bar" id="sync-bar">
+        <button class="sync-btn" id="sync-minus" title="가사 0.5초 앞으로">-0.5</button>
+        <span class="sync-label" id="sync-label" title="클릭하면 초기화">±0.0s</span>
+        <button class="sync-btn" id="sync-plus" title="가사 0.5초 뒤로">+0.5</button>
+      </div>
+    </div>
+
+    <!-- 재생목록 탭 -->
+    <div class="tab-content" id="tab-queue">
+      <div class="queue-header" id="queue-header">
+        <div class="queue-header-title" id="queue-title" title="클릭하여 재생목록 전환">내 재생목록 ▾</div>
+        <div class="pl-dropdown" id="pl-dropdown"></div>
+        <div class="queue-header-count" id="queue-count">0곡</div>
+        <button class="queue-add-pl-btn" id="queue-add-pl" title="새 재생목록"><svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></button>
+        <button class="queue-more-btn" id="queue-more" title="더보기"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+      </div>
+      <div class="queue-list" id="queue-list">
+        <div class="queue-empty">검색에서 곡을 추가하세요</div>
+      </div>
+    </div>
+    <div class="pl-menu" id="pl-menu"></div>
+    <div class="toast" id="toast"></div>
+    <div class="confirm-overlay" id="confirm-overlay">
+      <div class="confirm-box">
+        <div class="confirm-msg" id="confirm-msg"></div>
+        <div class="confirm-actions">
+          <button class="confirm-btn cancel" id="confirm-cancel">취소</button>
+          <button class="confirm-btn ok" id="confirm-ok">확인</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 즐겨찾기 탭 -->
+    <div class="tab-content" id="tab-favorites">
+      <div class="history-list" id="favorites-list">
+        <div class="history-empty">즐겨찾기가 없습니다</div>
+      </div>
+    </div>
+
+    <!-- 히스토리 탭 -->
+    <div class="tab-content" id="tab-history">
+      <div class="history-list" id="history-list">
+        <div class="history-empty">재생 기록이 없습니다</div>
+      </div>
+    </div>
+
+    <!-- 검색 탭 -->
+    <div class="tab-content" id="tab-search">
+      <div class="search-wrap">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+        <input class="search-input" id="search-input" type="text" placeholder="곡 제목, 아티스트 검색..." autocomplete="off" spellcheck="false">
+        <button class="search-clear" id="search-clear">&times;</button>
+      </div>
+      <div class="search-mode-toggle">
+        <button class="search-mode-btn active" data-mode="video">영상</button>
+        <button class="search-mode-btn" data-mode="playlist">플레이리스트</button>
+      </div>
+      <div class="search-results" id="search-results">
+        <div class="search-empty">검색어를 입력하세요</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const popup = document.querySelector('.popup')
+    const lyricsBody = document.getElementById('lyrics-body')
+    const historyList = document.getElementById('history-list')
+    const favoritesList = document.getElementById('favorites-list')
+    const searchInput = document.getElementById('search-input')
+    const searchClear = document.getElementById('search-clear')
+    const searchResults = document.getElementById('search-results')
+    const tabBtns = document.querySelectorAll('.tab-btn')
+    const tabContents = document.querySelectorAll('.tab-content')
+
+    let syncedLyrics = null
+    let searchTimer = null
+    let historyData = []
+    let favoritesData = []
+    let searchMode = 'video'  // 'video' | 'playlist'
+    let syncOffset = 0  // 초 단위 (양수: 가사 늦춤, 음수: 가사 앞당김)
+
+    const syncBar = document.getElementById('sync-bar')
+    const syncLabel = document.getElementById('sync-label')
+    const syncMinus = document.getElementById('sync-minus')
+    const syncPlus = document.getElementById('sync-plus')
+
+    function updateSyncLabel() {
+      const sign = syncOffset > 0 ? '+' : syncOffset < 0 ? '' : '±'
+      syncLabel.textContent = `${sign}${syncOffset.toFixed(1)}s`
+      syncLabel.classList.toggle('adjusted', syncOffset !== 0)
+    }
+
+    syncMinus.addEventListener('click', () => window.electronAPI.adjustSync(-0.5))
+    syncPlus.addEventListener('click', () => window.electronAPI.adjustSync(0.5))
+    syncLabel.addEventListener('click', () => window.electronAPI.resetSync())
+
+    window.electronAPI.onSyncOffset((val) => {
+      syncOffset = val
+      updateSyncLabel()
+    })
+
+    // ─── 검색 모드 토글 ──────────────────────────
+    const modeBtns = document.querySelectorAll('.search-mode-btn')
+    modeBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        searchMode = btn.dataset.mode
+        modeBtns.forEach(b => b.classList.toggle('active', b.dataset.mode === searchMode))
+        const q = searchInput.value.trim()
+        if (q) doSearch(q)
+      })
+    })
+
+    // ─── 탭 전환 ─────────────────────────────────
+    function switchTab(tab) {
+      tabBtns.forEach(b => b.classList.toggle('active', b.dataset.tab === tab))
+      tabContents.forEach(c => c.classList.toggle('active', c.id === `tab-${tab}`))
+      if (tab === 'history') window.electronAPI.requestHistory()
+      if (tab === 'favorites') window.electronAPI.requestFavorites()
+      if (tab === 'queue') window.electronAPI.requestPlaylists()
+      if (tab === 'search') searchInput.focus()
+    }
+
+    tabBtns.forEach(btn => {
+      btn.addEventListener('click', () => switchTab(btn.dataset.tab))
+    })
+
+    // main에서 탭 전환 요청
+    window.electronAPI.onPopupTab((tab) => switchTab(tab))
+
+    // ─── 가사 ────────────────────────────────────
+    window.electronAPI.onLyricsUpdate((data) => {
+      if (!data) {
+        lyricsBody.innerHTML = '<div class="lyrics-placeholder">가사를 찾을 수 없습니다</div>'
+        syncedLyrics = null
+        syncBar.classList.remove('visible')
+        return
+      }
+      syncedLyrics = data.synced || null
+      if (data.synced) {
+        lyricsBody.innerHTML = data.synced
+          .map((line, i) => `<div class="lyrics-line" data-index="${i}" data-time="${line.time}">${line.text}</div>`)
+          .join('')
+        syncBar.classList.add('visible')
+      } else if (data.plain) {
+        lyricsBody.innerHTML = data.plain
+          .split('\n').filter(l => l.trim())
+          .map(l => `<div class="lyrics-line past">${l}</div>`).join('')
+        syncedLyrics = null
+        syncBar.classList.remove('visible')
+      } else {
+        lyricsBody.innerHTML = '<div class="lyrics-placeholder">가사 없음</div>'
+        syncedLyrics = null
+        syncBar.classList.remove('visible')
+      }
+    })
+
+    lyricsBody.addEventListener('click', (e) => {
+      const line = e.target.closest('.lyrics-line[data-time]')
+      if (!line) return
+      const time = parseFloat(line.dataset.time)
+      if (!isNaN(time)) window.electronAPI.seekTo(time)
+    })
+
+    window.electronAPI.onMediaProgress((data) => {
+      if (!syncedLyrics) return
+      const adjustedTime = data.currentTime + syncOffset
+      let activeIndex = -1
+      for (let i = syncedLyrics.length - 1; i >= 0; i--) {
+        if (adjustedTime >= syncedLyrics[i].time) { activeIndex = i; break }
+      }
+      const lines = lyricsBody.querySelectorAll('.lyrics-line')
+      lines.forEach((el, i) => {
+        el.classList.remove('active', 'past')
+        if (i === activeIndex) el.classList.add('active')
+        else if (i < activeIndex) el.classList.add('past')
+      })
+      if (activeIndex >= 0 && lines[activeIndex]) {
+        const scrollTo = lines[activeIndex].offsetTop - lyricsBody.clientHeight / 3
+        lyricsBody.scrollTo({ top: scrollTo, behavior: 'smooth' })
+      }
+    })
+
+    // ─── 히스토리 ────────────────────────────────
+    function getTimeAgo(timestamp) {
+      const diff = Date.now() - timestamp
+      const min = Math.floor(diff / 60000)
+      if (min < 1) return '방금'
+      if (min < 60) return `${min}분`
+      const hr = Math.floor(min / 60)
+      if (hr < 24) return `${hr}시간`
+      return `${Math.floor(hr / 24)}일`
+    }
+
+    window.electronAPI.onHistory((data) => {
+      historyData = data || []
+      if (!data || data.length === 0) {
+        historyList.innerHTML = '<div class="history-empty">재생 기록이 없습니다</div>'
+        return
+      }
+      historyList.innerHTML = data.map((song, i) => `
+        <div class="history-item" data-index="${i}">
+          <div class="history-item-info">
+            <div class="history-item-title">${escapeHtml(song.title)}</div>
+            <div class="history-item-artist">${escapeHtml(song.artist)}</div>
+          </div>
+          <div class="history-item-time">${getTimeAgo(song.playedAt)}</div>
+        </div>
+      `).join('')
+    })
+
+    historyList.addEventListener('click', (e) => {
+      const item = e.target.closest('.history-item')
+      if (!item) return
+      const idx = parseInt(item.dataset.index)
+      const song = historyData[idx]
+      if (song?.url) window.electronAPI.navigateUrl(song.url, {
+        title: song.title, artist: song.artist, thumbnail: song.thumbnail, videoId: song.videoId
+      })
+    })
+
+    // ─── 즐겨찾기 ──────────────────────────────────
+    window.electronAPI.onFavoriteList((data) => {
+      favoritesData = data || []
+      if (!data || data.length === 0) {
+        favoritesList.innerHTML = '<div class="history-empty">즐겨찾기가 없습니다</div>'
+        return
+      }
+      favoritesList.innerHTML = data.map((song, i) => `
+        <div class="history-item" data-index="${i}">
+          <div class="history-item-info">
+            <div class="history-item-title">${escapeHtml(song.title)}</div>
+            <div class="history-item-artist">${escapeHtml(song.artist)}</div>
+          </div>
+        </div>
+      `).join('')
+    })
+
+    favoritesList.addEventListener('click', (e) => {
+      const item = e.target.closest('.history-item')
+      if (!item) return
+      const idx = parseInt(item.dataset.index)
+      const song = favoritesData[idx]
+      if (song?.url) window.electronAPI.navigateUrl(song.url, {
+        title: song.title, artist: song.artist, thumbnail: song.thumbnail || '', videoId: song.videoId
+      })
+    })
+
+    // ─── 다중 재생목록 ──────────────────────────────
+    const queueList = document.getElementById('queue-list')
+    const queueCount = document.getElementById('queue-count')
+    const queueTitle = document.getElementById('queue-title')
+    const plDropdown = document.getElementById('pl-dropdown')
+    const plMenu = document.getElementById('pl-menu')
+    const toastEl = document.getElementById('toast')
+    const addPlBtn = document.getElementById('queue-add-pl')
+    const moreBtn = document.getElementById('queue-more')
+
+    let currentVideoId = null
+    let queueData = []         // 활성 재생목록의 songs (하위 호환)
+    let queueIndex = -1
+    let queueActive = false
+    let playlistsData = []     // [{ id, name, songCount }]
+    let activePlaylistId = null
+    let dropdownOpen = false
+    let menuOpen = false
+    let toastTimer = null
+    let renaming = false
+
+    window.electronAPI.onMediaUpdate((data) => {
+      if (data.videoId && data.videoId !== currentVideoId) {
+        currentVideoId = data.videoId
+        renderSongs()
+      }
+    })
+
+    // 하위 호환: queue:update도 수신
+    window.electronAPI.onQueueUpdate((data) => {
+      queueData = data.queue || []
+      queueIndex = data.index ?? data.currentIndex ?? -1
+      queueActive = data.active
+      queueCount.textContent = `${queueData.length}곡`
+      renderSongs()
+    })
+
+    // 새로운 playlist:update 수신
+    window.electronAPI.onPlaylistUpdate((data) => {
+      playlistsData = data.playlists || []
+      activePlaylistId = data.activePlaylistId
+      queueData = data.activePlaylist?.songs || []
+      queueIndex = data.currentIndex ?? -1
+      queueActive = data.active
+      queueCount.textContent = `${queueData.length}곡`
+      // 헤더 업데이트
+      const activePl = playlistsData.find(p => p.id === activePlaylistId)
+      if (!renaming) {
+        queueTitle.textContent = activePl ? `${activePl.name} ▾` : '재생목록 ▾'
+      }
+      renderSongs()
+    })
+
+    function renderSongs() {
+      if (!queueData.length) {
+        if (playlistsData.length === 0) {
+          queueList.innerHTML = '<div class="queue-empty">+ 버튼으로 재생목록을 만들고<br>검색에서 곡을 추가하세요</div>'
+        } else {
+          queueList.innerHTML = '<div class="queue-empty">검색에서 곡을 추가하세요</div>'
+        }
+        return
+      }
+      queueList.innerHTML = queueData.map((v, i) => {
+        const isCurrent = v.videoId === currentVideoId
+        return `
+          <div class="queue-item${isCurrent ? ' now-playing' : ''}" data-index="${i}">
+            <div class="queue-item-idx">${isCurrent ? '▶' : (i + 1)}</div>
+            <div class="queue-item-info">
+              <div class="queue-item-title">${escapeHtml(v.title)}</div>
+              <div class="queue-item-artist">${escapeHtml(v.artist)}</div>
+            </div>
+            <div class="queue-item-move" data-index="${i}">
+              <span data-dir="up" title="위로">▲</span>
+              <span data-dir="down" title="아래로">▼</span>
+            </div>
+            <button class="queue-item-remove" data-vid="${v.videoId}" title="삭제">✕</button>
+          </div>
+        `
+      }).join('')
+      const current = queueList.querySelector('.now-playing')
+      if (current) {
+        const scrollTo = current.offsetTop - queueList.clientHeight / 3
+        queueList.scrollTo({ top: scrollTo, behavior: 'smooth' })
+      }
+    }
+
+    queueList.addEventListener('click', (e) => {
+      // 순서 변경 버튼
+      const moveSpan = e.target.closest('.queue-item-move span')
+      if (moveSpan) {
+        e.stopPropagation()
+        const moveEl = moveSpan.parentElement
+        const fromIdx = parseInt(moveEl.dataset.index)
+        const dir = moveSpan.dataset.dir
+        const toIdx = dir === 'up' ? fromIdx - 1 : fromIdx + 1
+        if (toIdx >= 0 && toIdx < queueData.length && activePlaylistId) {
+          window.electronAPI.reorderSong(activePlaylistId, fromIdx, toIdx)
+        }
+        return
+      }
+      // 삭제 버튼
+      const removeBtn = e.target.closest('.queue-item-remove')
+      if (removeBtn) {
+        e.stopPropagation()
+        if (activePlaylistId) {
+          window.electronAPI.removeSongFromPlaylist(activePlaylistId, removeBtn.dataset.vid)
+        }
+        return
+      }
+      // 곡 클릭 → 재생
+      const item = e.target.closest('.queue-item')
+      if (!item) return
+      const idx = parseInt(item.dataset.index)
+      if (activePlaylistId) {
+        window.electronAPI.selectPlaylist(activePlaylistId)
+      }
+      window.electronAPI.playFromPlaylist(idx)
+    })
+
+    // ─── 드롭다운 (재생목록 선택) ────────────────────
+    queueTitle.addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (renaming) return
+      dropdownOpen = !dropdownOpen
+      if (dropdownOpen) renderDropdown()
+      plDropdown.classList.toggle('show', dropdownOpen)
+    })
+
+    function renderDropdown() {
+      let html = ''
+      playlistsData.forEach(pl => {
+        const isActive = pl.id === activePlaylistId
+        html += `<div class="pl-dropdown-item${isActive ? ' active' : ''}" data-id="${pl.id}">
+          <span class="pl-check">${isActive ? '✓' : ''}</span>
+          <span class="pl-name">${escapeHtml(pl.name)}</span>
+          <span class="pl-count">${pl.songCount}곡</span>
+        </div>`
+      })
+      if (playlistsData.length > 0) html += '<div class="pl-dropdown-sep"></div>'
+      html += '<div class="pl-dropdown-item" data-action="import"><span class="pl-check"></span><span class="pl-name">파일에서 가져오기</span></div>'
+      plDropdown.innerHTML = html
+    }
+
+    plDropdown.addEventListener('click', (e) => {
+      const item = e.target.closest('.pl-dropdown-item')
+      if (!item) return
+      e.stopPropagation()
+      const action = item.dataset.action
+      if (action === 'import') {
+        window.electronAPI.importPlaylist()
+      } else {
+        const id = item.dataset.id
+        if (id && id !== activePlaylistId) {
+          window.electronAPI.selectPlaylist(id)
+        }
+      }
+      closeDropdown()
+    })
+
+    function closeDropdown() {
+      dropdownOpen = false
+      plDropdown.classList.remove('show')
+    }
+
+    // ─── 새 재생목록 버튼 ────────────────────────────
+    addPlBtn.addEventListener('click', (e) => {
+      e.stopPropagation()
+      // 기본 이름으로 바로 생성 후 인라인 이름 변경
+      const defaultName = `재생목록 ${playlistsData.length + 1}`
+      window.electronAPI.createPlaylist(defaultName)
+      showToast(`"${defaultName}" 생성됨`)
+    })
+
+    // ─── 더보기 메뉴 ────────────────────────────────
+    moreBtn.addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (!activePlaylistId) return
+      menuOpen = !menuOpen
+      if (menuOpen) {
+        const rect = moreBtn.getBoundingClientRect()
+        plMenu.style.top = `${rect.bottom + 2}px`
+        plMenu.style.right = `${360 - rect.right}px`
+        plMenu.style.left = 'auto'
+        plMenu.innerHTML = `
+          <div class="pl-menu-item" data-action="rename">이름 변경</div>
+          <div class="pl-menu-item" data-action="duplicate">복제</div>
+          <div class="pl-menu-item" data-action="export">내보내기</div>
+          <div class="pl-menu-sep"></div>
+          <div class="pl-menu-item" data-action="clear">곡 전체 삭제</div>
+          <div class="pl-menu-item danger" data-action="delete">재생목록 삭제</div>
+        `
+      }
+      plMenu.classList.toggle('show', menuOpen)
+    })
+
+    plMenu.addEventListener('click', (e) => {
+      const item = e.target.closest('.pl-menu-item')
+      if (!item) return
+      e.stopPropagation()
+      const action = item.dataset.action
+      closeMenu()
+      if (!activePlaylistId) return
+      const activePl = playlistsData.find(p => p.id === activePlaylistId)
+      switch (action) {
+        case 'rename':
+          startRename()
+          break
+        case 'duplicate': {
+          const newName = activePl ? `${activePl.name} (복사)` : '복사본'
+          window.electronAPI.duplicatePlaylist(activePlaylistId, newName)
+          showToast(`"${newName}" 복제됨`)
+          break
+        }
+        case 'export':
+          window.electronAPI.exportPlaylist(activePlaylistId)
+          break
+        case 'clear':
+          showConfirm('이 재생목록의 모든 곡을 삭제할까요?').then(ok => {
+            if (ok) window.electronAPI.clearPlaylist(activePlaylistId)
+          })
+          break
+        case 'delete':
+          showConfirm(`"${activePl?.name || '재생목록'}"을(를) 삭제할까요?`).then(ok => {
+            if (ok) {
+              window.electronAPI.deletePlaylist(activePlaylistId)
+              showToast('재생목록 삭제됨')
+            }
+          })
+          break
+      }
+    })
+
+    function closeMenu() {
+      menuOpen = false
+      plMenu.classList.remove('show')
+    }
+
+    // ─── 인라인 이름 변경 ───────────────────────────
+    function startRename() {
+      const activePl = playlistsData.find(p => p.id === activePlaylistId)
+      if (!activePl) return
+      renaming = true
+      queueTitle.innerHTML = `<input class="pl-name-input" type="text" value="${escapeHtml(activePl.name)}" maxlength="50">`
+      const input = queueTitle.querySelector('.pl-name-input')
+      input.focus()
+      input.select()
+      const finish = () => {
+        const newName = input.value.trim()
+        renaming = false
+        if (newName && newName !== activePl.name) {
+          window.electronAPI.renamePlaylist(activePlaylistId, newName)
+          showToast(`"${newName}"(으)로 변경됨`)
+        } else {
+          queueTitle.textContent = `${activePl.name} ▾`
+        }
+      }
+      input.addEventListener('blur', finish)
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur() }
+        if (e.key === 'Escape') { input.value = activePl.name; input.blur() }
+      })
+    }
+
+    // ─── 토스트 ─────────────────────────────────────
+    function showToast(msg) {
+      toastEl.textContent = msg
+      toastEl.classList.add('show')
+      if (toastTimer) clearTimeout(toastTimer)
+      toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2000)
+    }
+
+    // ─── 커스텀 확인 모달 ───────────────────────────
+    const confirmOverlay = document.getElementById('confirm-overlay')
+    const confirmMsg = document.getElementById('confirm-msg')
+    const confirmOk = document.getElementById('confirm-ok')
+    const confirmCancel = document.getElementById('confirm-cancel')
+    let confirmResolve = null
+
+    function showConfirm(msg) {
+      return new Promise(resolve => {
+        confirmMsg.textContent = msg
+        confirmOverlay.classList.add('show')
+        confirmResolve = resolve
+      })
+    }
+    confirmOk.addEventListener('click', () => {
+      confirmOverlay.classList.remove('show')
+      if (confirmResolve) confirmResolve(true)
+      confirmResolve = null
+    })
+    confirmCancel.addEventListener('click', () => {
+      confirmOverlay.classList.remove('show')
+      if (confirmResolve) confirmResolve(false)
+      confirmResolve = null
+    })
+    confirmOverlay.addEventListener('click', (e) => {
+      if (e.target === confirmOverlay) {
+        confirmOverlay.classList.remove('show')
+        if (confirmResolve) confirmResolve(false)
+        confirmResolve = null
+      }
+    })
+
+    // ─── 드롭다운/메뉴 닫기 (외부 클릭) ──────────────
+    document.addEventListener('click', () => {
+      closeDropdown()
+      closeMenu()
+    })
+
+    // ─── 검색 ────────────────────────────────────
+    searchInput.addEventListener('input', () => {
+      const q = searchInput.value.trim()
+      searchClear.style.display = q ? 'block' : 'none'
+      if (searchTimer) clearTimeout(searchTimer)
+      if (!q) {
+        searchResults.innerHTML = '<div class="search-empty">검색어를 입력하세요</div>'
+        return
+      }
+      searchTimer = setTimeout(() => doSearch(q), 400)
+    })
+
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        const q = searchInput.value.trim()
+        if (q) doSearch(q)
+      }
+    })
+
+    searchClear.addEventListener('click', () => {
+      searchInput.value = ''
+      searchClear.style.display = 'none'
+      searchResults.innerHTML = '<div class="search-empty">검색어를 입력하세요</div>'
+      searchInput.focus()
+    })
+
+    async function doSearch(query) {
+      searchResults.innerHTML = '<div class="search-loading">검색 중...</div>'
+      try {
+        const results = await window.electronAPI.searchYoutube(query, searchMode)
+        if (!results || results.length === 0) {
+          searchResults.innerHTML = '<div class="search-empty">검색 결과가 없습니다</div>'
+          return
+        }
+        renderSearchResults(results)
+      } catch {
+        searchResults.innerHTML = '<div class="search-empty">검색 오류</div>'
+      }
+    }
+
+    function renderSearchResults(results) {
+      searchResults.innerHTML = ''
+      results.forEach(item => {
+        const div = document.createElement('div')
+        div.className = 'search-item'
+        if (item.type === 'playlist') {
+          const countText = item.videoCount ? `${item.videoCount}곡` : ''
+          div.innerHTML = `
+            <div class="search-item-thumb"><img src="${item.thumbnail}" alt="" loading="lazy"></div>
+            <div class="search-item-info">
+              <div class="search-item-title">${escapeHtml(item.title)}<span class="search-item-badge">LIST</span></div>
+              <div class="search-item-meta">${escapeHtml(item.artist)}${countText ? ' · ' + countText : ''}</div>
+            </div>
+          `
+          div.addEventListener('click', () => showPlaylistDetail(item.playlistId, item.url, item.title))
+        } else {
+          const inQueue = queueData.some(q => q.videoId === item.videoId)
+          div.innerHTML = `
+            <div class="search-item-thumb"><img src="${item.thumbnail}" alt="" loading="lazy"></div>
+            <div class="search-item-info">
+              <div class="search-item-title">${escapeHtml(item.title)}</div>
+              <div class="search-item-meta">${escapeHtml(item.artist)}${item.duration ? ' · ' + item.duration : ''}</div>
+            </div>
+            <button class="search-item-add${inQueue ? ' added' : ''}" data-vid="${item.videoId}" title="${inQueue ? '추가됨' : '큐에 추가'}">${inQueue ? '✓' : '+'}</button>
+          `
+          // 곡 클릭 → 재생
+          div.querySelector('.search-item-info').addEventListener('click', () => {
+            window.electronAPI.navigateUrl(item.url, {
+              title: item.title, artist: item.artist, thumbnail: item.thumbnail, videoId: item.videoId || ''
+            })
+          })
+          div.querySelector('.search-item-thumb').addEventListener('click', () => {
+            window.electronAPI.navigateUrl(item.url, {
+              title: item.title, artist: item.artist, thumbnail: item.thumbnail, videoId: item.videoId || ''
+            })
+          })
+          // + 버튼 → 활성 재생목록에 추가
+          const addBtn = div.querySelector('.search-item-add')
+          if (!inQueue) {
+            addBtn.addEventListener('click', (e) => {
+              e.stopPropagation()
+              window.electronAPI.addToQueue({
+                title: item.title, artist: item.artist, thumbnail: item.thumbnail, videoId: item.videoId
+              })
+              addBtn.textContent = '✓'
+              addBtn.classList.add('added')
+              const plName = playlistsData.find(p => p.id === activePlaylistId)?.name || '재생목록'
+              showToast(`${plName}에 추가됨`)
+            })
+          }
+        }
+        searchResults.appendChild(div)
+      })
+    }
+
+    async function showPlaylistDetail(playlistId, playAllUrl, fallbackTitle) {
+      searchResults.innerHTML = '<div class="search-loading">불러오는 중...</div>'
+      try {
+        const detail = await window.electronAPI.searchYoutube(playlistId, 'playlist-detail')
+        const plTitle = detail.title || fallbackTitle || '플레이리스트'
+        const videos = detail.videos || []
+
+        // 헤더 (뒤로가기 + 제목 + 전체 추가 + 전체 재생)
+        const header = document.createElement('div')
+        header.className = 'playlist-detail-header'
+        header.innerHTML = `
+          <button class="playlist-back" title="뒤로">&larr;</button>
+          <div class="playlist-detail-title">${escapeHtml(plTitle)} (${videos.length})</div>
+          <button class="playlist-play-all" id="pl-add-all">전체 추가</button>
+          <button class="playlist-play-all">전체 재생</button>
+        `
+        header.querySelector('.playlist-back').addEventListener('click', () => {
+          const q = searchInput.value.trim()
+          if (q) doSearch(q)
+        })
+        header.querySelector('#pl-add-all').addEventListener('click', (e) => {
+          const btn = e.target
+          const songs = videos.filter(v => v.videoId).map(v => ({
+            title: v.title, artist: v.artist, thumbnail: v.thumbnail, videoId: v.videoId
+          }))
+          window.electronAPI.addBulkToQueue(songs)
+          btn.textContent = '추가됨'
+          btn.style.pointerEvents = 'none'
+          btn.style.color = '#ff4444'
+          const plName = playlistsData.find(p => p.id === activePlaylistId)?.name || '재생목록'
+          showToast(`${songs.length}곡이 ${plName}에 추가됨`)
+          // 개별 + 버튼도 모두 체크 상태로
+          searchResults.querySelectorAll('.search-item-add:not(.added)').forEach(ab => {
+            ab.textContent = '✓'
+            ab.classList.add('added')
+          })
+        })
+        header.querySelectorAll('.playlist-play-all')[1].addEventListener('click', () => {
+          window.electronAPI.navigateUrl(playAllUrl, { title: plTitle, artist: '', thumbnail: '', videoId: '' })
+        })
+
+        searchResults.innerHTML = ''
+        searchResults.appendChild(header)
+
+        if (!videos.length) {
+          searchResults.insertAdjacentHTML('beforeend', '<div class="search-empty">곡이 없습니다</div>')
+          return
+        }
+
+        videos.forEach(v => {
+          const div = document.createElement('div')
+          div.className = 'search-item'
+          const inQueue = queueData.some(q => q.videoId === v.videoId)
+          div.innerHTML = `
+            <div class="search-item-thumb"><img src="${v.thumbnail}" alt="" loading="lazy"></div>
+            <div class="search-item-info">
+              <div class="search-item-title">${escapeHtml(v.title)}</div>
+              <div class="search-item-meta">${escapeHtml(v.artist)}${v.duration ? ' · ' + v.duration : ''}</div>
+            </div>
+            <button class="search-item-add${inQueue ? ' added' : ''}" data-vid="${v.videoId}" title="${inQueue ? '추가됨' : '큐에 추가'}">${inQueue ? '✓' : '+'}</button>
+          `
+          // 곡 클릭 → 재생
+          div.querySelector('.search-item-info').addEventListener('click', () => {
+            window.electronAPI.navigateUrl(v.url, {
+              title: v.title, artist: v.artist, thumbnail: v.thumbnail, videoId: v.videoId
+            })
+          })
+          div.querySelector('.search-item-thumb').addEventListener('click', () => {
+            window.electronAPI.navigateUrl(v.url, {
+              title: v.title, artist: v.artist, thumbnail: v.thumbnail, videoId: v.videoId
+            })
+          })
+          // + 버튼 → 활성 재생목록에 개별 추가
+          const addBtn = div.querySelector('.search-item-add')
+          if (!inQueue) {
+            addBtn.addEventListener('click', (e) => {
+              e.stopPropagation()
+              window.electronAPI.addToQueue({
+                title: v.title, artist: v.artist, thumbnail: v.thumbnail, videoId: v.videoId
+              })
+              addBtn.textContent = '✓'
+              addBtn.classList.add('added')
+            })
+          }
+          searchResults.appendChild(div)
+        })
+      } catch {
+        searchResults.innerHTML = '<div class="search-empty">불러오기 실패</div>'
+      }
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div')
+      div.textContent = str || ''
+      return div.innerHTML
+    }
+
+    // ─── 공통: 투명도, 드래그, 우클릭 ───────────
+    window.electronAPI.onOpacityChanged((val) => { popup.style.opacity = val })
+
+    window.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      window.electronAPI.adjustOpacity(e.deltaY > 0 ? -0.05 : 0.05)
+    }, { passive: false })
+
+    window.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      window.electronAPI.hideMiniLyrics()
+    })
+
+    window.electronAPI.onFadeout(() => {
+      popup.style.transition = 'opacity 0.3s ease'
+      popup.style.opacity = '0'
+    })
+
+    let dragging = false
+    let dragStart = { x: 0, y: 0 }
+
+    popup.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return
+      if (e.target.closest('.lyrics-line[data-time]')) return
+      if (e.target.closest('input')) return
+      if (e.target.closest('button')) return
+      if (e.target.closest('.history-item')) return
+      if (e.target.closest('.search-item')) return
+      if (e.target.closest('.fav-item')) return
+      if (e.target.closest('.queue-item')) return
+      if (e.target.closest('.pl-dropdown-item')) return
+      if (e.target.closest('.pl-menu-item')) return
+      dragging = true
+      dragStart = { x: e.screenX, y: e.screenY }
+    })
+
+    window.addEventListener('mousemove', (e) => {
+      if (!dragging) return
+      const dx = e.screenX - dragStart.x
+      const dy = e.screenY - dragStart.y
+      dragStart = { x: e.screenX, y: e.screenY }
+      window.electronAPI.moveWindow(dx, dy)
+    })
+
+    window.addEventListener('mouseup', () => { dragging = false })
+  </script>
+</body>
+</html>

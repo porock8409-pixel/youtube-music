@@ -1,0 +1,60 @@
+{
+  "name": "youtube-music",
+  "version": "3.3.0",
+  "description": "YouTube Music Desktop App",
+  "type": "commonjs",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:dir": "electron-builder --dir"
+  },
+  "author": "rockuen",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^40.8.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.rockuen.youtube-music",
+    "productName": "YouTube Music",
+    "directories": {
+      "output": "dist"
+    },
+    "asar": true,
+    "compression": "maximum",
+    "removePackageScripts": true,
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "YouTube-Music-Setup-${version}.exe"
+    },
+    "portable": {
+      "artifactName": "YouTube Music.exe"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "preload-ui.js",
+      "renderer/**/*",
+      "assets/icon.png",
+      "assets/icon.ico",
+      "assets/tray.png",
+      "!node_modules",
+      "!dist",
+      "!.git"
+    ],
+    "extraResources": [],
+    "electronLanguages": ["ko", "en-US"]
+  }
+}
