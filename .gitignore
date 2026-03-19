@@ -1,0 +1,9 @@
+node_modules/
+dist/
+backup-*/
+*.exe
+
+# macOS
+.DS_Store
+*.dmg
+*.app

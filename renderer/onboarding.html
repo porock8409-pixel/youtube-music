@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>YouTube Music - Welcome</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+      background: #0f0f0f;
+      color: #fff;
+      overflow: hidden;
+      user-select: none;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ─── 타이틀바 (macOS 드래그 영역) ─── */
+    .titlebar {
+      height: 32px;
+      -webkit-app-region: drag;
+      flex-shrink: 0;
+    }
+
+    /* ─── 슬라이드 컨테이너 ─── */
+    .slides {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+    .slide {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 40px;
+      opacity: 0;
+      transform: translateX(60px);
+      transition: opacity 0.4s, transform 0.4s;
+      pointer-events: none;
+    }
+    .slide.active {
+      opacity: 1;
+      transform: translateX(0);
+      pointer-events: auto;
+    }
+    .slide.exit {
+      opacity: 0;
+      transform: translateX(-60px);
+    }
+
+    /* ─── 공통 요소 ─── */
+    .slide-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+    .slide-title {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+    .slide-desc {
+      font-size: 13px;
+      color: rgba(255,255,255,0.55);
+      text-align: center;
+      line-height: 1.7;
+      max-width: 380px;
+    }
+    .slide-hint {
+      font-size: 11px;
+      color: rgba(255,255,255,0.3);
+      margin-top: 8px;
+    }
+
+    /* ─── 버튼 ─── */
+    .btn-primary {
+      background: #ff4444;
+      border: none;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 10px 32px;
+      border-radius: 24px;
+      cursor: pointer;
+      margin-top: 24px;
+      transition: background 0.2s, transform 0.1s;
+      -webkit-app-region: no-drag;
+    }
+    .btn-primary:hover { background: #ff5555; }
+    .btn-primary:active { transform: scale(0.97); }
+
+    .btn-secondary {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.7);
+      font-size: 13px;
+      padding: 8px 24px;
+      border-radius: 20px;
+      cursor: pointer;
+      margin-top: 12px;
+      transition: all 0.2s;
+      -webkit-app-region: no-drag;
+    }
+    .btn-secondary:hover { background: rgba(255,255,255,0.12); color: #fff; }
+
+    /* ─── 기능 가이드 카드 ─── */
+    .features {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 20px;
+      width: 100%;
+      max-width: 400px;
+    }
+    .feature-card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px;
+      padding: 14px;
+      text-align: center;
+    }
+    .feature-card-icon { font-size: 24px; margin-bottom: 6px; }
+    .feature-card-title { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+    .feature-card-desc { font-size: 10px; color: rgba(255,255,255,0.4); line-height: 1.5; }
+
+    /* ─── 단축키 목록 ─── */
+    .shortcuts {
+      margin-top: 16px;
+      width: 100%;
+      max-width: 340px;
+    }
+    .shortcut-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .shortcut-label { font-size: 12px; color: rgba(255,255,255,0.6); }
+    .shortcut-key {
+      font-size: 11px;
+      color: rgba(255,255,255,0.4);
+      background: rgba(255,255,255,0.06);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: monospace;
+    }
+
+    /* ─── 하단 인디케이터 ─── */
+    .footer {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.15);
+      transition: all 0.3s;
+    }
+    .dot.active { background: #ff4444; width: 18px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div class="titlebar"></div>
+
+  <div class="slides" id="slides">
+    <!-- 1. 환영 -->
+    <div class="slide active" data-slide="0">
+      <div class="slide-icon">&#127925;</div>
+      <div class="slide-title">YouTube Music</div>
+      <div class="slide-desc">
+        백그라운드 음악 재생, 미니 플레이어, 실시간 가사까지.<br>
+        YouTube를 데스크톱 뮤직 플레이어로 사용하세요.
+      </div>
+      <button class="btn-primary" onclick="nextSlide()">시작하기</button>
+    </div>
+
+    <!-- 2. YouTube 로그인 -->
+    <div class="slide" data-slide="1">
+      <div class="slide-icon">&#128274;</div>
+      <div class="slide-title">YouTube 로그인</div>
+      <div class="slide-desc">
+        로그인하면 구독한 채널, 재생목록, 좋아요 표시한 음악을<br>
+        그대로 사용할 수 있습니다.<br><br>
+        로그인 버튼을 누르면 YouTube 화면이 열립니다.<br>
+        로그인 완료 후 그 창은 닫아주세요.
+      </div>
+      <button class="btn-primary" onclick="doLogin()">YouTube 로그인</button>
+      <button class="btn-secondary" onclick="nextSlide()">나중에 할게요</button>
+      <div class="slide-hint">설정 메뉴에서 언제든 로그인할 수 있습니다</div>
+    </div>
+
+    <!-- 3. 핵심 기능 -->
+    <div class="slide" data-slide="2">
+      <div class="slide-title">핵심 기능</div>
+      <div class="features">
+        <div class="feature-card">
+          <div class="feature-card-icon">&#127926;</div>
+          <div class="feature-card-title">미니 플레이어</div>
+          <div class="feature-card-desc">항상 위에 떠있는<br>컴팩트 플레이어</div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-card-icon">&#9193;</div>
+          <div class="feature-card-title">광고 자동 스킵</div>
+          <div class="feature-card-desc">YouTube 광고를<br>자동으로 건너뜁니다</div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-card-icon">&#128221;</div>
+          <div class="feature-card-title">실시간 가사</div>
+          <div class="feature-card-desc">곡 재생 시 가사 자동 표시<br>가사 클릭하면 해당 위치로 이동</div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-card-icon">&#128260;</div>
+          <div class="feature-card-title">다른 가사 선택</div>
+          <div class="feature-card-desc">가사가 안 맞으면<br>"다른 가사" 버튼으로 변경</div>
+        </div>
+      </div>
+      <button class="btn-primary" onclick="nextSlide()">다음</button>
+    </div>
+
+    <!-- 4. 검색 & 저장 기능 -->
+    <div class="slide" data-slide="3">
+      <div class="slide-title">검색 & 저장</div>
+      <div class="features">
+        <div class="feature-card">
+          <div class="feature-card-icon">&#128269;</div>
+          <div class="feature-card-title">곡 / 재생목록 검색</div>
+          <div class="feature-card-desc">곡과 재생목록을<br>따로 검색할 수 있어요</div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-card-icon">&#128220;</div>
+          <div class="feature-card-title">로컬 재생목록</div>
+          <div class="feature-card-desc">나만의 재생목록을<br>앱에 저장 & 관리</div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-card-icon">&#11088;</div>
+          <div class="feature-card-title">즐겨찾기</div>
+          <div class="feature-card-desc">좋아하는 곡을<br>빠르게 저장 & 재생</div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-card-icon">&#128336;</div>
+          <div class="feature-card-title">최근 재생</div>
+          <div class="feature-card-desc">들었던 곡 기록을<br>자동으로 저장</div>
+        </div>
+      </div>
+      <button class="btn-primary" onclick="nextSlide()">다음</button>
+    </div>
+
+    <!-- 5. 단축키 안내 -->
+    <div class="slide" data-slide="4">
+      <div class="slide-title">단축키</div>
+      <div class="slide-desc">이것만 알면 됩니다</div>
+      <div class="shortcuts" id="shortcuts-list"></div>
+      <button class="btn-primary" onclick="nextSlide()">다음</button>
+    </div>
+
+    <!-- 6. 사용법 -->
+    <div class="slide" data-slide="5">
+      <div class="slide-icon">&#9989;</div>
+      <div class="slide-title">준비 완료!</div>
+      <div class="slide-desc">
+        <strong>상단 메뉴바 아이콘</strong>을 클릭하면 미니 플레이어가 나타납니다.<br>
+        우클릭하면 설정 메뉴를 볼 수 있어요.<br><br>
+        음악을 재생하면 미니 플레이어에 곡 정보가 표시됩니다.
+      </div>
+      <button class="btn-primary" onclick="finish()">시작하기</button>
+    </div>
+  </div>
+
+  <div class="footer" id="footer">
+    <div class="dot active"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+  </div>
+
+  <script>
+    const isMac = navigator.platform.includes('Mac') || navigator.userAgent.includes('Macintosh')
+    let current = 0
+    const totalSlides = 6
+
+    // 플랫폼별 단축키 표시
+    const shortcutsEl = document.getElementById('shortcuts-list')
+    const mod = isMac ? '⌘' : 'Ctrl'
+    const shortcuts = [
+      ['미니플레이어 토글', isMac ? '⌘⇧M' : 'Ctrl+M'],
+      ['가사 보기', `${mod}+L`],
+      ['미니플레이어 이동', isMac ? '⌘+드래그' : 'Alt+드래그'],
+      ['원래 위치로 복귀', 'Esc'],
+      ['더블클릭', '확장/컴팩트 전환'],
+      ['싱글클릭', '가사 팝업 토글']
+    ]
+    shortcutsEl.innerHTML = shortcuts.map(([label, key]) =>
+      `<div class="shortcut-row">
+        <span class="shortcut-label">${label}</span>
+        <span class="shortcut-key">${key}</span>
+      </div>`
+    ).join('')
+
+    function nextSlide() {
+      if (current >= totalSlides - 1) return
+      const slides = document.querySelectorAll('.slide')
+      const dots = document.querySelectorAll('.dot')
+      slides[current].classList.remove('active')
+      slides[current].classList.add('exit')
+      current++
+      slides[current].classList.add('active')
+      dots.forEach((d, i) => d.classList.toggle('active', i === current))
+      setTimeout(() => {
+        slides[current - 1].classList.remove('exit')
+      }, 400)
+    }
+
+    function doLogin() {
+      window.electronAPI.openYoutubeLogin()
+      nextSlide()
+    }
+
+    function finish() {
+      window.electronAPI.finishOnboarding()
+    }
+
+    // 로그인 상태 주기적 확인 (로그인 창 열린 후 감지)
+    async function checkLogin() {
+      if (window.electronAPI.checkYoutubeLogin) {
+        const loggedIn = await window.electronAPI.checkYoutubeLogin()
+        const loginSlide = document.querySelector('[data-slide="1"]')
+        if (loggedIn && loginSlide) {
+          const desc = loginSlide.querySelector('.slide-desc')
+          const btn = loginSlide.querySelector('.btn-primary')
+          const hint = loginSlide.querySelector('.slide-hint')
+          desc.innerHTML = 'YouTube 로그인이 확인되었습니다!<br>구독, 재생목록, 좋아요 음악을 사용할 수 있습니다.'
+          if (btn) { btn.textContent = '다음'; btn.onclick = () => nextSlide() }
+          if (hint) hint.textContent = ''
+        }
+      }
+    }
+    setInterval(checkLogin, 3000)
+    checkLogin()
+  </script>
+</body>
+</html>

@@ -1,0 +1,122 @@
+{
+  "name": "youtube-music",
+  "version": "3.3.0",
+  "description": "YouTube Music Desktop App",
+  "type": "commonjs",
+  "main": "main.js",
+  "scripts": {
+    "postinstall": "xattr -cr node_modules/electron/dist/Electron.app 2>/dev/null || true",
+    "start": "unset ELECTRON_RUN_AS_NODE && electron .",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:dir": "electron-builder --dir"
+  },
+  "author": "rockuen",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.rockuen.youtube-music",
+    "productName": "YouTube Music",
+    "directories": {
+      "output": "dist"
+    },
+    "asar": true,
+    "compression": "maximum",
+    "removePackageScripts": true,
+    "publish": {
+      "provider": "github",
+      "owner": "porock8409-pixel",
+      "repo": "youtube-music",
+      "private": true
+    },
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "YouTube-Music-Setup-${version}.exe"
+    },
+    "portable": {
+      "artifactName": "YouTube Music.exe"
+    },
+    "mac": {
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.music",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "darkModeSupport": true,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "title": "YouTube Music",
+      "artifactName": "YouTube-Music-${version}-${arch}.dmg",
+      "window": {
+        "width": 540,
+        "height": 380
+      },
+      "icon": "assets/icon.icns",
+      "iconSize": 80,
+      "contents": [
+        {
+          "x": 140,
+          "y": 190
+        },
+        {
+          "x": 400,
+          "y": 190,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "preload-ui.js",
+      "renderer/**/*",
+      "assets/icon.png",
+      "assets/icon.ico",
+      "assets/icon.icns",
+      "assets/tray.png",
+      "!dist",
+      "!.git"
+    ],
+    "extraResources": [],
+    "electronLanguages": [
+      "ko",
+      "en-US"
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3"
+  }
+}

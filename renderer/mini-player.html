@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>Mini Player</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      background: transparent;
+      overflow: hidden;
+      font-family: 'Segoe UI', -apple-system, system-ui, sans-serif;
+      user-select: none;
+    }
+
+    .widget {
+      width: 360px;
+      background: rgba(18, 18, 18, 0.88);
+      backdrop-filter: blur(28px);
+      -webkit-backdrop-filter: blur(28px);
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.07);
+      display: flex;
+      flex-direction: column;
+      cursor: default;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,0,0,0.3);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .widget.compact { height: 72px; padding: 10px 14px 6px; }
+    .widget.expanded { height: 300px; padding: 0; }
+
+    /* 배경 앨범아트 블러 */
+    .widget-bg {
+      position: absolute;
+      inset: 0;
+      background-size: cover;
+      background-position: center;
+      filter: blur(40px) brightness(0.3);
+      opacity: 0;
+      transition: opacity 0.8s ease;
+      z-index: 0;
+    }
+    .widget-bg.active { opacity: 0.5; }
+
+    .widget-content {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ─── 컴팩트 모드 ─── */
+    .compact-view {
+      display: flex;
+      flex-direction: column;
+      padding: 0;
+    }
+    .widget.expanded .compact-view { display: none; }
+
+    .widget-top {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .widget-thumb {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.06);
+      overflow: hidden;
+      flex-shrink: 0;
+      position: relative;
+    }
+    .compact-ad-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      color: #ffcc00;
+      font-size: 7px;
+      font-weight: 700;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      line-height: 1.2;
+      border-radius: 8px;
+    }
+    .compact-ad-overlay.visible { display: flex; }
+    .widget-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: none;
+    }
+
+    .widget-info {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+    }
+    .widget-title, .widget-artist {
+      white-space: nowrap;
+      overflow: hidden;
+      line-height: 1.3;
+    }
+    .widget-title {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: #fff;
+    }
+    .widget-artist {
+      font-size: 10.5px;
+      color: rgba(255,255,255,0.5);
+    }
+
+    /* 마퀴 */
+    .marquee-enabled .widget-title.overflows,
+    .marquee-enabled .widget-artist.overflows {
+      text-overflow: clip;
+    }
+    .marquee-enabled .widget-title.overflows .marquee-inner,
+    .marquee-enabled .widget-artist.overflows .marquee-inner {
+      display: inline-block;
+      animation: marquee-scroll 12s linear infinite;
+      padding-right: 60px;
+    }
+    @keyframes marquee-scroll {
+      0%   { transform: translateX(0); }
+      100% { transform: translateX(-50%); }
+    }
+    .widget-title:not(.overflows),
+    .widget-artist:not(.overflows) {
+      text-overflow: ellipsis;
+    }
+
+    .widget-controls {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border: none;
+      background: transparent;
+      color: rgba(255,255,255,0.65);
+      cursor: pointer;
+      border-radius: 50%;
+      transition: all 0.15s;
+    }
+    .btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+    .btn.play { width: 32px; height: 32px; color: #fff; }
+    .btn.play:hover { background: rgba(255,255,255,0.15); }
+
+    .progress {
+      width: 100%;
+      height: 4px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 2px;
+      margin-top: 5px;
+      overflow: hidden;
+      cursor: pointer;
+    }
+    .progress:hover { height: 6px; margin-top: 4px; }
+    .progress-fill {
+      height: 100%;
+      background: #ff0000;
+      border-radius: 2px;
+      width: 0%;
+      transition: width 0.4s linear;
+    }
+
+    .opacity-toast {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0,0,0,0.7);
+      color: #fff;
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 8px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+      z-index: 10;
+    }
+    .opacity-toast.show { opacity: 1; }
+
+    .title-tooltip {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: rgba(0,0,0,0.92);
+      color: #fff;
+      font-size: 11px;
+      padding: 6px 12px;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s;
+      z-index: 20;
+      border-radius: 16px 16px 0 0;
+    }
+    .title-tooltip.show { opacity: 1; }
+
+    .btn.popup-toggle { color: rgba(255,255,255,0.35); }
+    .btn.popup-toggle.active { color: #ff0000; }
+
+    .btn.mute-btn { color: rgba(255,255,255,0.55); }
+    .btn.mute-btn.muted { color: #ff4444; }
+
+    .btn.expand-btn { color: rgba(255,255,255,0.3); width: 22px; height: 22px; }
+    .btn.expand-btn:hover { color: rgba(255,255,255,0.7); }
+
+    .btn.compact-fav { color: rgba(255,255,255,0.25); }
+    .btn.compact-fav:hover { color: rgba(255,255,255,0.6); }
+    .btn.compact-fav.fav-active { color: #ffd700; }
+    .btn.compact-fav.fav-active:hover { color: #ffec80; }
+
+    .ex-collapse {
+      position: absolute;
+      top: 6px;
+      right: 8px;
+      z-index: 2;
+    }
+    .ex-collapse .btn { width: 22px; height: 22px; color: rgba(255,255,255,0.3); }
+    .ex-collapse .btn:hover { color: rgba(255,255,255,0.7); }
+
+    .ex-fav {
+      position: absolute;
+      top: 6px;
+      left: 8px;
+      z-index: 2;
+    }
+    .ex-fav .btn { width: 22px; height: 22px; color: rgba(255,255,255,0.25); }
+    .ex-fav .btn:hover { color: rgba(255,255,255,0.6); }
+    .ex-fav .btn.fav-active { color: #ffd700; }
+    .ex-fav .btn.fav-active:hover { color: #ffec80; }
+
+    /* ─── 확장 모드 ─── */
+    .expanded-view {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      flex: 1;
+      overflow: hidden;
+    }
+    .widget.expanded .expanded-view { display: flex; }
+
+    .ex-thumb {
+      width: 140px;
+      height: 140px;
+      border-radius: 12px;
+      overflow: hidden;
+      margin-top: 16px;
+      background: rgba(255,255,255,0.06);
+      flex-shrink: 0;
+      position: relative;
+    }
+    .ex-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: none;
+    }
+    .ad-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.65);
+      color: #ffcc00;
+      font-size: 11px;
+      font-weight: 600;
+      justify-content: center;
+      align-items: center;
+      letter-spacing: 0.5px;
+      border-radius: 12px;
+    }
+    .ad-overlay.visible { display: flex; }
+
+    .ex-info {
+      text-align: center;
+      padding: 8px 16px 0;
+      width: 100%;
+      overflow: hidden;
+    }
+    .ex-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .ex-title.overflows {
+      text-overflow: clip;
+    }
+    .ex-title.overflows .marquee-inner {
+      display: inline-block;
+      animation: marquee-scroll var(--marquee-dur, 12s) linear infinite;
+      padding-right: 60px;
+    }
+    .ex-artist {
+      font-size: 11px;
+      color: rgba(255,255,255,0.5);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+    .ex-artist.overflows {
+      text-overflow: clip;
+    }
+    .ex-artist.overflows .marquee-inner {
+      display: inline-block;
+      animation: marquee-scroll var(--marquee-dur, 12s) linear infinite;
+      padding-right: 60px;
+    }
+
+    .ex-controls {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 6px 0 2px;
+    }
+    .ex-controls .btn { width: 32px; height: 32px; }
+    .ex-controls .btn.play { width: 38px; height: 38px; }
+    .ex-controls .btn svg { width: 16px; height: 16px; }
+    .ex-controls .btn.play svg { width: 22px; height: 22px; }
+
+    .ex-progress {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 16px;
+      width: 100%;
+    }
+    .ex-progress .progress {
+      flex: 1;
+      margin-top: 0;
+    }
+    .ex-time {
+      font-size: 9px;
+      color: rgba(255,255,255,0.4);
+      min-width: 28px;
+      text-align: center;
+    }
+
+    /* ─── 버튼 색상 ─── */
+  </style>
+</head>
+<body>
+  <div class="widget compact">
+    <div class="title-tooltip" id="title-tooltip"></div>
+    <div class="opacity-toast" id="opacity-toast"></div>
+    <div class="widget-bg" id="bg"></div>
+    <div class="widget-content">
+      <!-- 컴팩트 모드 -->
+      <div class="compact-view">
+        <div class="widget-top">
+          <div class="widget-thumb">
+            <img id="thumb" src="" alt="">
+            <div class="compact-ad-overlay" id="compact-ad-overlay">AD</div>
+          </div>
+          <div class="widget-info">
+            <div class="widget-title" id="title">재생 중인 곡 없음</div>
+            <div class="widget-artist" id="artist"></div>
+          </div>
+          <div class="widget-controls">
+            <button class="btn" id="btn-prev" title="이전">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+              </svg>
+            </button>
+            <button class="btn play" id="btn-play" title="재생/일시정지">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" id="play-icon">
+                <path d="M8 5v14l11-7z"/>
+              </svg>
+            </button>
+            <button class="btn" id="btn-next" title="다음">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+              </svg>
+            </button>
+            <button class="btn mute-btn" id="btn-mute" title="무음 해제" style="display:none">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" id="mute-icon">
+                <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+              </svg>
+            </button>
+            <button class="btn popup-toggle" id="btn-popup" title="팝업">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor">
+                <path d="M3 3h8v8H3V3zm0 10h8v8H3v-8zm10-10h8v8h-8V3zm0 10h8v8h-8v-8z"/>
+              </svg>
+            </button>
+            <button class="btn compact-fav" id="btn-compact-fav" title="즐겨찾기">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor">
+                <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+              </svg>
+            </button>
+            <button class="btn expand-btn" id="btn-close-compact" title="닫기">
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor">
+                <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="progress" id="progress-bar-compact">
+          <div class="progress-fill" id="progress"></div>
+        </div>
+      </div>
+
+      <!-- 확장 모드 -->
+      <div class="expanded-view">
+        <div class="ex-fav">
+          <button class="btn" id="btn-fav" title="즐겨찾기">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" id="fav-icon">
+              <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+            </svg>
+          </button>
+        </div>
+        <div class="ex-collapse">
+          <button class="btn" id="btn-close-expanded" title="닫기">
+            <svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor">
+              <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+            </svg>
+          </button>
+        </div>
+        <div class="ex-thumb">
+          <img id="ex-thumb-img" src="" alt="">
+          <div class="ad-overlay" id="ad-overlay">광고 대기중</div>
+        </div>
+        <div class="ex-info">
+          <div class="ex-title" id="ex-title">재생 중인 곡 없음</div>
+          <div class="ex-artist" id="ex-artist"></div>
+        </div>
+        <div class="ex-controls">
+          <button class="btn" id="ex-prev" title="이전">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+          </button>
+          <button class="btn play" id="ex-play" title="재생/일시정지">
+            <svg viewBox="0 0 24 24" fill="currentColor" id="ex-play-icon"><path d="M8 5v14l11-7z"/></svg>
+          </button>
+          <button class="btn" id="ex-next" title="다음">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+          </button>
+          <button class="btn mute-btn" id="ex-mute" title="무음 해제">
+            <svg viewBox="0 0 24 24" fill="currentColor" id="ex-mute-icon"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+          </button>
+          <button class="btn popup-toggle" id="ex-popup" title="팝업">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 3h8v8H3V3zm0 10h8v8H3v-8zm10-10h8v8h-8V3zm0 10h8v8h-8v-8z"/></svg>
+          </button>
+        </div>
+        <div class="ex-progress">
+          <span class="ex-time" id="time-current">0:00</span>
+          <div class="progress" id="progress-bar-expanded">
+            <div class="progress-fill" id="progress-ex"></div>
+          </div>
+          <span class="ex-time" id="time-total">0:00</span>
+        </div>
+        <!-- 히스토리/검색은 보조 팝업으로 이동 -->
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const titleEl = document.getElementById('title')
+    const artistEl = document.getElementById('artist')
+    const thumbEl = document.getElementById('thumb')
+    const bgEl = document.getElementById('bg')
+    const playIcon = document.getElementById('play-icon')
+    const progressEl = document.getElementById('progress')
+    const progressBarCompact = document.getElementById('progress-bar-compact')
+    const btnPopup = document.getElementById('btn-popup')
+    const exPopup = document.getElementById('ex-popup')
+
+    // 확장 모드 요소
+    const exThumbImg = document.getElementById('ex-thumb-img')
+    const exTitle = document.getElementById('ex-title')
+    const exArtist = document.getElementById('ex-artist')
+    const exPlayIcon = document.getElementById('ex-play-icon')
+    const progressExEl = document.getElementById('progress-ex')
+    const progressBarExpanded = document.getElementById('progress-bar-expanded')
+    const timeCurrent = document.getElementById('time-current')
+    const timeTotal = document.getElementById('time-total')
+
+    let isPlaying = false
+    let mediaDuration = 0
+    let mediaCurrentTime = 0
+    let playlistInfo = null
+    let currentTitle = ''
+    let currentArtist = ''
+    let marqueeEnabled = true
+    let currentMode = 'compact'
+    const widget = document.querySelector('.widget')
+
+    function formatTime(sec) {
+      if (!sec || isNaN(sec)) return '0:00'
+      const m = Math.floor(sec / 60)
+      const s = Math.floor(sec % 60)
+      return `${m}:${s.toString().padStart(2, '0')}`
+    }
+
+    const adOverlay = document.getElementById('ad-overlay')
+    const compactAdOverlay = document.getElementById('compact-ad-overlay')
+
+    window.electronAPI.onMediaUpdate((data) => {
+      if (data.title) {
+        currentTitle = data.title
+        currentArtist = data.artist || ''
+        applyMarqueeAll()
+      }
+      if (data.thumbnail) {
+        thumbEl.src = data.thumbnail
+        thumbEl.style.display = 'block'
+        exThumbImg.src = data.thumbnail
+        exThumbImg.style.display = 'block'
+        bgEl.style.backgroundImage = `url(${data.thumbnail})`
+        bgEl.classList.add('active')
+      }
+      isPlaying = data.isPlaying
+      updatePlayIcon()
+      // 광고 상태 (확장 + 컴팩트 모두)
+      adOverlay.classList.toggle('visible', !!data.adShowing)
+      compactAdOverlay.classList.toggle('visible', !!data.adShowing)
+    })
+
+    let marqueePxPerSec = 20  // 일정한 속도 (px/s), 설정 메뉴에서 변경 가능
+
+    function applyMarqueeAll() {
+      // 현재 모드에 맞는 요소에만 적용 (숨겨진 요소는 크기 0이라 마퀴 안 됨)
+      if (currentMode === 'compact') {
+        setMarqueeText(titleEl, currentTitle)
+        setMarqueeText(artistEl, currentArtist)
+      } else {
+        setMarqueeText(exTitle, currentTitle)
+        setMarqueeText(exArtist, currentArtist)
+      }
+    }
+
+    function setMarqueeText(el, text) {
+      el.textContent = text
+      el.classList.remove('overflows')
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (marqueeEnabled && el.scrollWidth > el.clientWidth) {
+            const textWidth = el.scrollWidth + 60
+            const duration = textWidth / marqueePxPerSec
+            el.innerHTML = `<span class="marquee-inner" style="animation-duration:${duration}s">${text}${text}</span>`
+            el.classList.add('overflows')
+          }
+        })
+      })
+    }
+
+    // 마퀴 설정
+    window.electronAPI.onMarquee((val) => {
+      marqueeEnabled = val
+      if (val) {
+        widget.classList.add('marquee-enabled')
+        if (currentTitle) applyMarqueeAll()
+      } else {
+        widget.classList.remove('marquee-enabled')
+        titleEl.classList.remove('overflows')
+        titleEl.textContent = currentTitle
+        artistEl.classList.remove('overflows')
+        artistEl.textContent = currentArtist
+        exTitle.classList.remove('overflows')
+        exTitle.textContent = currentTitle
+        exArtist.classList.remove('overflows')
+        exArtist.textContent = currentArtist
+      }
+    })
+    window.electronAPI.onMarqueeSpeed((val) => {
+      marqueePxPerSec = val
+      if (marqueeEnabled && currentTitle) applyMarqueeAll()
+    })
+    widget.classList.add('marquee-enabled')
+
+    // 컨트롤 버튼 (컴팩트 + 확장)
+    document.getElementById('btn-play').addEventListener('click', () => window.electronAPI.playPause())
+    document.getElementById('btn-prev').addEventListener('click', () => window.electronAPI.prev())
+    document.getElementById('btn-next').addEventListener('click', () => window.electronAPI.next())
+    btnPopup.addEventListener('click', () => window.electronAPI.toggleMiniLyrics())
+
+    document.getElementById('ex-play').addEventListener('click', () => window.electronAPI.playPause())
+    document.getElementById('ex-prev').addEventListener('click', () => window.electronAPI.prev())
+    document.getElementById('ex-next').addEventListener('click', () => window.electronAPI.next())
+    document.getElementById('ex-mute').addEventListener('click', () => window.electronAPI.toggleMute())
+    document.getElementById('btn-mute').addEventListener('click', () => window.electronAPI.toggleMute())
+    document.getElementById('btn-close-compact').addEventListener('click', () => window.electronAPI.closeMini())
+    document.getElementById('btn-close-expanded').addEventListener('click', () => window.electronAPI.closeMini())
+    exPopup.addEventListener('click', () => window.electronAPI.toggleMiniLyrics())
+
+    // 즐겨찾기 (컴팩트 + 확장)
+    const btnFav = document.getElementById('btn-fav')
+    const btnCompactFav = document.getElementById('btn-compact-fav')
+    btnFav.addEventListener('click', () => window.electronAPI.toggleFavorite())
+    btnCompactFav.addEventListener('click', () => window.electronAPI.toggleFavorite())
+    window.electronAPI.onFavoriteState((isFav) => {
+      btnFav.classList.toggle('fav-active', isFav)
+      btnCompactFav.classList.toggle('fav-active', isFav)
+    })
+
+    function updatePlayIcon() {
+      const path = isPlaying
+        ? '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>'
+        : '<path d="M8 5v14l11-7z"/>'
+      playIcon.innerHTML = path
+      exPlayIcon.innerHTML = path
+    }
+
+    // 확장 무음 버튼 위 휠 → 볼륨 조절
+    let currentVolume = 100
+    const exMuteBtn = document.getElementById('ex-mute')
+    exMuteBtn.addEventListener('wheel', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const delta = e.deltaY < 0 ? 5 : -5
+      currentVolume = Math.max(0, Math.min(100, currentVolume + delta))
+      window.electronAPI.setVolume(currentVolume)
+      showOpacityToast(`🔊 ${currentVolume}%`)
+    }, { passive: false })
+
+    window.electronAPI.onVolumeChanged((vol) => {
+      currentVolume = vol
+    })
+
+    // 팝업 활성 상태
+    window.electronAPI.onMiniLyricsVisibility((visible) => {
+      btnPopup.classList.toggle('active', visible)
+      exPopup.classList.toggle('active', visible)
+    })
+
+    // 무음 상태
+    const btnMute = document.getElementById('btn-mute')
+    const muteIcon = document.getElementById('mute-icon')
+    const exMute = document.getElementById('ex-mute')
+    const exMuteIcon = document.getElementById('ex-mute-icon')
+    const MUTED_PATH = 'M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z'
+    const UNMUTED_PATH = 'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z'
+
+    window.electronAPI.onMuteChanged((isMuted) => {
+      // 컴팩트: 무음일 때만 버튼 표시
+      btnMute.style.display = isMuted ? 'flex' : 'none'
+      btnMute.classList.toggle('muted', isMuted)
+      muteIcon.innerHTML = `<path d="${isMuted ? MUTED_PATH : UNMUTED_PATH}"/>`
+      // 확장: 항상 표시, 상태만 변경
+      exMute.classList.toggle('muted', isMuted)
+      exMuteIcon.innerHTML = `<path d="${isMuted ? MUTED_PATH : UNMUTED_PATH}"/>`
+      exMute.title = isMuted ? '무음 해제' : '무음'
+    })
+
+    // 프로그레스 바
+    window.electronAPI.onMediaProgress((data) => {
+      progressEl.style.width = data.percent + '%'
+      progressExEl.style.width = data.percent + '%'
+      mediaDuration = data.duration || 0
+      mediaCurrentTime = data.currentTime || 0
+      timeCurrent.textContent = formatTime(data.currentTime)
+      timeTotal.textContent = formatTime(data.duration)
+    })
+
+    // 프로그레스 바 클릭 (컴팩트)
+    progressBarCompact.addEventListener('click', (e) => {
+      if (!mediaDuration) return
+      const rect = progressBarCompact.getBoundingClientRect()
+      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+      window.electronAPI.seekTo(ratio * mediaDuration)
+    })
+
+    // 프로그레스 바 클릭 (확장)
+    progressBarExpanded.addEventListener('click', (e) => {
+      if (!mediaDuration) return
+      const rect = progressBarExpanded.getBoundingClientRect()
+      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+      window.electronAPI.seekTo(ratio * mediaDuration)
+    })
+
+    // 플레이리스트 정보
+    window.electronAPI.onPlaylist((data) => {
+      playlistInfo = data
+      updateArtistDisplay()
+    })
+
+    // 모드 전환
+    window.electronAPI.onMiniMode((mode) => {
+      currentMode = mode
+      widget.classList.remove('compact', 'expanded')
+      widget.classList.add(mode)
+      // 전환 후 보이는 요소에 마퀴 재적용
+      if (currentTitle) applyMarqueeAll()
+    })
+
+    // Ctrl+휠 투명도 조절
+    const opacityToast = document.getElementById('opacity-toast')
+    let toastTimer = null
+
+    function showOpacityToast(val) {
+      opacityToast.textContent = typeof val === 'string' ? val : `${Math.round(val * 100)}%`
+      opacityToast.classList.add('show')
+      if (toastTimer) clearTimeout(toastTimer)
+      toastTimer = setTimeout(() => opacityToast.classList.remove('show'), 800)
+    }
+
+    window.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      const delta = e.deltaY > 0 ? -0.05 : 0.05
+      window.electronAPI.adjustOpacity(delta)
+    }, { passive: false })
+
+    window.electronAPI.onOpacityChanged((val) => {
+      widget.style.opacity = val
+      showOpacityToast(val)
+    })
+
+    // 우클릭 → 컨텍스트 메뉴
+    window.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      window.electronAPI.showMiniContextMenu()
+    })
+
+    // 페이드아웃/인
+    window.electronAPI.onFadeout(() => {
+      widget.style.transition = 'opacity 0.3s ease'
+      widget.style.opacity = '0'
+    })
+    window.electronAPI.onFadein(() => {
+      widget.style.transition = 'none'
+      widget.style.opacity = ''
+    })
+
+    // 제목 호버 → 전체 제목 툴팁 (fixed 위치로 widget 밖에 표시)
+    const titleTooltip = document.getElementById('title-tooltip')
+    let tooltipTimer = null
+    const titleAreas = [titleEl, exTitle]
+    titleAreas.forEach(el => {
+      el.addEventListener('mouseenter', () => {
+        if (!currentTitle) return
+        tooltipTimer = setTimeout(() => {
+          titleTooltip.textContent = currentTitle
+          titleTooltip.classList.add('show')
+        }, 400)
+      })
+      el.addEventListener('mouseleave', () => {
+        if (tooltipTimer) { clearTimeout(tooltipTimer); tooltipTimer = null }
+        titleTooltip.classList.remove('show')
+      })
+    })
+
+    // 싱글클릭 → 가사 팝업 토글, 더블클릭 → 확장/컴팩트 전환
+    let clickTimer = null
+    let dblClickGuard = false
+    function isInteractiveTarget(e) {
+      return e.target.closest('button') || e.target.closest('.progress') || e.target.closest('.ex-progress') || e.target.closest('.ex-controls') || e.target.closest('.widget-controls')
+    }
+
+    widget.addEventListener('click', (e) => {
+      if (isInteractiveTarget(e)) return
+      if (dblClickGuard) return
+      if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; return }
+      clickTimer = setTimeout(() => {
+        clickTimer = null
+        if (!dblClickGuard) window.electronAPI.toggleMiniLyrics()
+      }, 350)
+    })
+
+    widget.addEventListener('dblclick', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (isInteractiveTarget(e)) return
+      if (clickTimer) { clearTimeout(clickTimer); clickTimer = null }
+      dblClickGuard = true
+      window.electronAPI.toggleExpanded()
+      setTimeout(() => { dblClickGuard = false }, 400)
+    })
+
+    // 미들클릭 → 확장/컴팩트 전환
+    widget.addEventListener('mousedown', (e) => {
+      if (e.button === 1) {
+        e.preventDefault()
+        window.electronAPI.toggleExpanded()
+      }
+    })
+
+    // JS 드래그 (macOS: Cmd+드래그 / Windows: Alt+드래그)
+    let dragging = false
+    let dragStart = { x: 0, y: 0 }
+    const isMacMini = navigator.platform.includes('Mac') || navigator.userAgent.includes('Macintosh')
+
+    function hasDragModifier(e) {
+      return isMacMini ? e.metaKey : e.altKey
+    }
+
+    widget.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return
+      if (e.target.closest('button')) return
+      if (!hasDragModifier(e)) return
+      dragging = true
+      dragStart = { x: e.screenX, y: e.screenY }
+    })
+
+    window.addEventListener('mousemove', (e) => {
+      if (!dragging) return
+      if (!hasDragModifier(e)) { dragging = false; return }
+      const dx = e.screenX - dragStart.x
+      const dy = e.screenY - dragStart.y
+      dragStart = { x: e.screenX, y: e.screenY }
+      window.electronAPI.moveWindow(dx, dy)
+    })
+
+    window.addEventListener('mouseup', async () => {
+      if (dragging) {
+        dragging = false
+        // 코너 근처면 자동 스냅
+        await window.electronAPI.snapCheck()
+      }
+    })
+
+    // Escape 키: 원래 설정 위치로 복귀
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') window.electronAPI.resetPosition()
+    })
+
+  </script>
+</body>
+</html>

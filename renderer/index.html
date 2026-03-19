@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>YouTube Music</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- 커스텀 타이틀바 -->
+  <div id="titlebar">
+    <div class="titlebar-left">
+      <div class="app-icon">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="#FF0000">
+          <path d="M23.5 6.19a3.02 3.02 0 0 0-2.12-2.14C19.5 3.5 12 3.5 12 3.5s-7.5 0-9.38.55A3.02 3.02 0 0 0 .5 6.19C0 8.07 0 12 0 12s0 3.93.5 5.81a3.02 3.02 0 0 0 2.12 2.14c1.88.55 9.38.55 9.38.55s7.5 0 9.38-.55a3.02 3.02 0 0 0 2.12-2.14C24 15.93 24 12 24 12s0-3.93-.5-5.81zM9.55 15.57V8.43L15.82 12l-6.27 3.57z"/>
+        </svg>
+      </div>
+      <span class="app-title">YouTube Music</span>
+      <span id="win-size" style="font-size:10px;color:rgba(255,255,255,0.35);margin-left:8px;"></span>
+    </div>
+
+    <div class="titlebar-center">
+      <button class="nav-btn" id="btn-back" title="뒤로">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+          <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+        </svg>
+      </button>
+      <button class="nav-btn" id="btn-forward" title="앞으로">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+          <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
+        </svg>
+      </button>
+      <button class="nav-btn" id="btn-home" title="홈">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+          <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="titlebar-right">
+      <button class="nav-btn" id="btn-lyrics" title="가사">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+          <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zM6 20V4h7v5h5v11H6zm2-6h8v2H8v-2zm0-3h8v2H8v-2zm0 6h5v2H8v-2z"/>
+        </svg>
+      </button>
+      <button class="win-btn" id="btn-minimize" title="최소화">
+        <svg viewBox="0 0 12 12" width="12" height="12" fill="currentColor">
+          <rect y="5" width="12" height="1.5"/>
+        </svg>
+      </button>
+      <button class="win-btn" id="btn-maximize" title="최대화">
+        <svg viewBox="0 0 12 12" width="12" height="12" fill="currentColor">
+          <rect x="1" y="1" width="10" height="10" stroke="currentColor" stroke-width="1.5" fill="none"/>
+        </svg>
+      </button>
+      <button class="win-btn win-close" id="btn-close" title="닫기">
+        <svg viewBox="0 0 12 12" width="12" height="12" fill="currentColor">
+          <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.5" fill="none"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- 가사 사이드 패널 -->
+  <div id="lyrics-panel" class="lyrics-panel hidden">
+    <div class="lyrics-header">
+      <span class="lyrics-label">Lyrics</span>
+      <span class="lyrics-source" id="lyrics-source"></span>
+    </div>
+    <div class="lyrics-body" id="lyrics-body">
+      <div class="lyrics-placeholder">곡을 재생하면 가사가 표시됩니다</div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
