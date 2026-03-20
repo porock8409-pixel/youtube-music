@@ -45,6 +45,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 보조 팝업 (가사/히스토리/검색)
   openPopup: (tab) => ipcRenderer.send('popup:open', tab),
 
+  // 코너 스내핑 + 위치 리셋
+  snapCheck: () => ipcRenderer.send('mini:snap-check'),
+  resetPosition: () => ipcRenderer.send('mini:reset-position'),
+
+  // 가사 후보 선택
+  getLyricsCandidates: () => ipcRenderer.invoke('lyrics:get-candidates'),
+  selectLyricsCandidate: (source, id) => ipcRenderer.send('lyrics:select-candidate', { source, id }),
+
+  // 온보딩
+  onboardingLogin: () => ipcRenderer.send('onboarding:login'),
+  onboardingFinish: () => ipcRenderer.send('onboarding:finish'),
+  checkYoutubeLogin: () => ipcRenderer.invoke('youtube:check-login'),
+
   // 미니 플레이어 컨텍스트 메뉴
   showMiniContextMenu: () => ipcRenderer.send('mini:context-menu'),
 

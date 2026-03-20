@@ -1,6 +1,6 @@
 {
   "name": "youtube-music",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "description": "YouTube Music Desktop App",
   "type": "commonjs",
   "main": "main.js",
@@ -11,8 +11,11 @@
   },
   "author": "rockuen",
   "license": "MIT",
+  "dependencies": {
+    "electron-updater": "^6.3.0"
+  },
   "devDependencies": {
-    "electron": "^40.8.0",
+    "electron": "^40.8.3",
     "electron-builder": "^25.0.0"
   },
   "build": {
@@ -29,7 +32,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
@@ -55,6 +60,15 @@
       "!.git"
     ],
     "extraResources": [],
-    "electronLanguages": ["ko", "en-US"]
+    "electronLanguages": [
+      "ko",
+      "en-US"
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "porock8409-pixel",
+      "repo": "youtube-music",
+      "private": true
+    }
   }
 }

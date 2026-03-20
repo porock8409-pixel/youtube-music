@@ -795,26 +795,39 @@
       }
     })
 
-    // JS 드래그
+    // JS 드래그 (Alt+드래그로 이동, 놓으면 코너 스냅)
     let dragging = false
     let dragStart = { x: 0, y: 0 }
 
     widget.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return
       if (e.target.closest('button')) return
+      if (!e.altKey) return  // Alt 키 필요
       dragging = true
       dragStart = { x: e.screenX, y: e.screenY }
     })
 
     window.addEventListener('mousemove', (e) => {
       if (!dragging) return
+      if (!e.altKey) { dragging = false; return }
       const dx = e.screenX - dragStart.x
       const dy = e.screenY - dragStart.y
       dragStart = { x: e.screenX, y: e.screenY }
       window.electronAPI.moveWindow(dx, dy)
     })
 
-    window.addEventListener('mouseup', () => { dragging = false })
+    window.addEventListener('mouseup', async () => {
+      if (dragging) {
+        dragging = false
+        // 코너 근처면 자동 스냅
+        await window.electronAPI.snapCheck()
+      }
+    })
+
+    // Escape 키: 원래 설정 위치로 복귀
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') window.electronAPI.resetPosition()
+    })
 
   </script>
 </body>

@@ -94,6 +94,54 @@ function setSyncOffset(videoId, offset) {
   saveLyricsSync()
 }
 
+// ─── Lyrics Selection Memory (곡별 가사 선택 기억) ────────
+
+let lyricsSelectionPath
+let lyricsSelections = {} // { [videoId]: { source: 'lrclib'|'netease', id: number|string } }
+
+function loadLyricsSelection() {
+  lyricsSelectionPath = path.join(app.getPath('userData'), 'lyrics-selection.json')
+  try {
+    if (fs.existsSync(lyricsSelectionPath)) {
+      lyricsSelections = JSON.parse(fs.readFileSync(lyricsSelectionPath, 'utf8'))
+    }
+  } catch { lyricsSelections = {} }
+}
+
+function saveLyricsSelection(videoId, source, id) {
+  lyricsSelections[videoId] = { source, id }
+  // 최대 500개 유지 (FIFO 제거)
+  const keys = Object.keys(lyricsSelections)
+  if (keys.length > 500) {
+    delete lyricsSelections[keys[0]]
+  }
+  try {
+    fs.writeFileSync(lyricsSelectionPath, JSON.stringify(lyricsSelections), 'utf8')
+  } catch {}
+}
+
+function getSavedLyricsSelection(videoId) {
+  return lyricsSelections[videoId] || null
+}
+
+async function fetchLyricsById(source, id) {
+  try {
+    if (source === 'lrclib') {
+      const res = await net.fetch(`https://lrclib.net/api/get/${id}`, {
+        headers: { 'User-Agent': 'YouTubeMusic Desktop App/1.0' }
+      })
+      const r = await res.json()
+      const lyrics = { plain: r.plainLyrics || '', synced: null, source: 'lrclib' }
+      if (r.syncedLyrics) lyrics.synced = parseLRC(r.syncedLyrics)
+      return lyrics
+    }
+    if (source === 'netease') {
+      return await neteaseLyrics(id)
+    }
+  } catch {}
+  return null
+}
+
 // ─── Song History ─────────────────────────────────────────
 
 let historyPath
@@ -574,6 +622,7 @@ if (!gotTheLock) {
     loadConfig()
     loadHistory()
     loadLyricsSync()
+    loadLyricsSelection()
     loadPlaylists()
     miniOpacity = getConfig('miniPlayer.opacity') ?? 1.0
     miniPlayerMode = getConfig('miniPlayer.mode') || 'expanded'
@@ -595,6 +644,17 @@ if (!gotTheLock) {
     // 해상도/모니터 변경 시 위젯 위치 재조정
     const { screen } = require('electron')
     screen.on('display-metrics-changed', repositionWidget)
+
+    // 온보딩 (첫 실행)
+    if (!getConfig('onboardingComplete')) {
+      showOnboarding()
+    }
+
+    // 자동 업데이터 설정
+    setupAutoUpdater()
+    // 첫 업데이트 체크 (30초 후), 이후 6시간마다
+    setTimeout(checkForUpdates, 30 * 1000)
+    setInterval(checkForUpdates, 6 * 60 * 60 * 1000)
 
     // 주기적 메모리 정리 (5분마다)
     setInterval(() => {
@@ -1390,6 +1450,38 @@ function buildSettingsSubmenu() {
           }
         }
       ]
+    },
+    { type: 'separator' },
+    {
+      label: 'YouTube 로그인 상태 확인',
+      click: async () => {
+        const loggedIn = await checkYoutubeLogin()
+        dialog.showMessageBox({
+          type: 'info',
+          title: 'YouTube 로그인',
+          message: loggedIn ? '✅ YouTube에 로그인되어 있습니다.' : '❌ YouTube에 로그인되어 있지 않습니다.\n메인창에서 로그인하세요.',
+          buttons: loggedIn ? ['확인'] : ['메인창 열기', '취소']
+        }).then(({ response }) => {
+          if (!loggedIn && response === 0 && mainWindow) {
+            mainWindow.show()
+            mainWindow.focus()
+          }
+        })
+      }
+    },
+    {
+      label: '온보딩 다시 보기',
+      click: () => showOnboarding()
+    },
+    {
+      label: '업데이트 확인',
+      click: () => {
+        if (autoUpdater) {
+          checkForUpdates()
+        } else {
+          dialog.showMessageBox({ type: 'info', message: 'electron-updater가 설치되지 않았습니다.' })
+        }
+      }
     }
   ]
 }
@@ -2135,6 +2227,121 @@ function parseInnerTubeResults(json) {
   return results.slice(0, 15).map(({ _isOfficial, _viewCount, ...rest }) => rest)
 }
 
+// ─── 가사 후보 선택 ───────────────────────────────────────
+
+ipcMain.handle('lyrics:get-candidates', async () => {
+  const title = currentMedia.title
+  const artist = currentMedia.artist || ''
+  if (!title) return []
+
+  const candidates = []
+  const cleanedTitle = cleanTrackTitle(title)
+  const cleanedArtist = cleanArtistName(artist)
+
+  // LRCLIB 후보
+  try {
+    const params = new URLSearchParams({ track_name: cleanedTitle, artist_name: cleanedArtist })
+    const url = `https://lrclib.net/api/search?${params.toString()}`
+    const res = await net.fetch(url, { headers: { 'User-Agent': 'YouTubeMusic Desktop App/1.0' } })
+    const results = await res.json()
+    for (const r of results.slice(0, 10)) {
+      candidates.push({
+        source: 'lrclib',
+        id: r.id,
+        trackName: r.trackName,
+        artistName: r.artistName,
+        albumName: r.albumName || '',
+        hasSynced: !!r.syncedLyrics,
+        isChineseOnly: false
+      })
+    }
+  } catch {}
+
+  // Netease 후보
+  try {
+    const results = await neteaseSearch(cleanedTitle, cleanedArtist)
+    for (const r of results.slice(0, 10)) {
+      const lyrics = await neteaseLyrics(r.id)
+      candidates.push({
+        source: 'netease',
+        id: r.id,
+        trackName: r.name,
+        artistName: r.artist,
+        albumName: r.album,
+        hasSynced: !!lyrics?.synced,
+        isChineseOnly: lyrics?.isChineseOnly || false
+      })
+    }
+  } catch {}
+
+  // 중국어 전용 결과를 뒤로 정렬
+  candidates.sort((a, b) => (a.isChineseOnly ? 1 : 0) - (b.isChineseOnly ? 1 : 0))
+
+  return candidates
+})
+
+ipcMain.on('lyrics:select-candidate', async (_, { source, id }) => {
+  const videoId = currentMedia.videoId
+  if (!videoId) return
+
+  const lyrics = await fetchLyricsById(source, id)
+  if (lyrics) {
+    currentLyrics = lyrics
+    saveLyricsSelection(videoId, source, id)
+    setSyncOffset(videoId, 0)
+    sendLyricsToAll()
+  }
+})
+
+// ─── 코너 스내핑 ──────────────────────────────────────────
+
+ipcMain.on('mini:snap-check', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return
+
+  const { screen } = require('electron')
+  const display = screen.getPrimaryDisplay()
+  const workArea = display.workArea
+  const bounds = win.getBounds()
+  const margin = 12
+
+  // 4개 코너 위치 계산
+  const corners = {
+    'top-left': { x: workArea.x + margin, y: workArea.y + margin },
+    'top-right': { x: workArea.x + workArea.width - bounds.width - margin, y: workArea.y + margin },
+    'bottom-left': { x: workArea.x + margin, y: workArea.y + workArea.height - bounds.height - margin },
+    'bottom-right': { x: workArea.x + workArea.width - bounds.width - margin, y: workArea.y + workArea.height - bounds.height - margin }
+  }
+
+  // 가장 가까운 코너 찾기
+  let nearest = null
+  let minDist = Infinity
+  for (const [name, pos] of Object.entries(corners)) {
+    const dist = Math.sqrt(Math.pow(bounds.x - pos.x, 2) + Math.pow(bounds.y - pos.y, 2))
+    if (dist < minDist) {
+      minDist = dist
+      nearest = { name, ...pos }
+    }
+  }
+
+  // 60px 이내면 스냅
+  if (nearest && minDist <= 60) {
+    win.setPosition(nearest.x, nearest.y)
+    setConfig('miniPlayer.position', nearest.name)
+    // 가사 팝업도 함께 이동
+    repositionLyricsPopup()
+  }
+})
+
+ipcMain.on('mini:reset-position', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return
+  const bounds = win.getBounds()
+  const pos = getWidgetPosition(bounds.width, bounds.height)
+  win.setPosition(pos.x, pos.y)
+  repositionLyricsPopup()
+})
+
 // 즐겨찾기 추가
 ipcMain.on('favorite:add', () => addFavorite())
 ipcMain.on('favorite:toggle', () => toggleFavorite())
@@ -2505,6 +2712,58 @@ async function fetchLyrics(title, artist) {
     result = await lrclibSearch(new URLSearchParams({
       track_name: title
     }), expectTrack)
+    if (result) return result
+  }
+
+  // 7단계: 한글 괄호 내용 추출 + 하이픈 분리
+  const koreanInParens = title.match(/[\(\[]([\uAC00-\uD7AF\s]+)[\)\]]/)
+  if (koreanInParens) {
+    const koTitle = koreanInParens[1].trim()
+    result = await lrclibSearch(new URLSearchParams({
+      track_name: koTitle, artist_name: cleanedArtist
+    }), koTitle, cleanedArtist)
+    if (result) return result
+
+    // 7-1: 한글 제목에서도 하이픈 분리 시도
+    const koParts = extractArtistFromTitle(koTitle)
+    if (koParts) {
+      for (const { artist: tA, track: tT } of koParts) {
+        if (tT.length > 1 && tA.length > 0) {
+          result = await lrclibSearch(new URLSearchParams({
+            track_name: tT, artist_name: tA
+          }), tT, tA)
+          if (result) return result
+        }
+      }
+    }
+  }
+
+  // 7-2: 영문 하이픈 분리 (cleanedTitle에서)
+  const enParts = extractArtistFromTitle(cleanedTitle)
+  if (enParts && !titleParts) {
+    for (const { artist: tA, track: tT } of enParts) {
+      if (tT.length > 1 && tA.length > 0) {
+        result = await lrclibSearch(new URLSearchParams({
+          track_name: tT, artist_name: tA
+        }), tT, tA)
+        if (result) return result
+      }
+    }
+  }
+
+  // 8단계: 아티스트 괄호 변형 (예: "G-DRAGON (지드래곤)" → "G-DRAGON" / "지드래곤")
+  const artistParens = (artist || '').match(/[\(\[](.*?)[\)\]]/)
+  if (artistParens) {
+    const innerArtist = artistParens[1].trim()
+    const outerArtist = artist.replace(/\s*[\(\[][^\)\]]*[\)\]]/g, '').trim()
+    for (const tryArtist of [innerArtist, outerArtist]) {
+      if (tryArtist) {
+        result = await lrclibSearch(new URLSearchParams({
+          track_name: cleanedTitle, artist_name: tryArtist
+        }), cleanedTitle, tryArtist)
+        if (result) return result
+      }
+    }
   }
 
   return result
@@ -2526,9 +2785,113 @@ function parseLRC(lrcText) {
   return lines.length ? lines : null
 }
 
+// ─── Netease Lyrics (폴백 가사 소스) ──────────────────────
+
+async function neteaseSearch(title, artist) {
+  try {
+    const query = artist ? `${artist} ${title}` : title
+    const url = `https://music.163.com/api/search/get/web?s=${encodeURIComponent(query)}&type=1&limit=10`
+    const res = await net.fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Referer': 'https://music.163.com'
+      }
+    })
+    const json = await res.json()
+    const songs = json?.result?.songs || []
+    return songs.map(s => ({
+      id: s.id,
+      name: s.name,
+      artist: s.artists?.map(a => a.name).join(', ') || '',
+      album: s.album?.name || ''
+    }))
+  } catch {
+    return []
+  }
+}
+
+async function neteaseLyrics(songId) {
+  try {
+    const url = `https://music.163.com/api/song/lyric?id=${songId}&lv=1&kv=1&tv=-1`
+    const res = await net.fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Referer': 'https://music.163.com'
+      }
+    })
+    const json = await res.json()
+    const lrcText = json?.lrc?.lyric || ''
+    if (!lrcText) return null
+
+    // 중국어 전용 가사 감지 (한글 없이 중국어만 있으면 스킵)
+    const hasChinese = /[\u4e00-\u9fff]/.test(lrcText)
+    const hasKorean = /[\uAC00-\uD7AF\u1100-\u11FF]/.test(lrcText)
+    const isChineseOnly = hasChinese && !hasKorean
+
+    const lyrics = { plain: lrcText.replace(/\[\d{2}:\d{2}\.\d{2,3}\]/g, '').trim(), synced: null, source: 'netease', isChineseOnly }
+    const synced = parseLRC(lrcText)
+    if (synced) lyrics.synced = synced
+    return lyrics
+  } catch {
+    return null
+  }
+}
+
+async function fetchLyricsFromNetease(title, artist) {
+  const queries = []
+
+  // 원본 제목+아티스트
+  queries.push({ title, artist })
+
+  // 한글 괄호 내용 추출 (예: "제목 (한글제목)" → "한글제목")
+  const koreanInParens = title.match(/[\(\[]([\uAC00-\uD7AF\s]+)[\)\]]/)
+  if (koreanInParens) {
+    queries.push({ title: koreanInParens[1].trim(), artist })
+  }
+
+  // 아티스트 괄호 변형
+  const bareArtist = (artist || '').replace(/\s*[\(\[][^\)\]]*[\)\]]/g, '').trim()
+  if (bareArtist && bareArtist !== artist) {
+    queries.push({ title, artist: bareArtist })
+  }
+
+  for (const q of queries) {
+    const results = await neteaseSearch(q.title, q.artist)
+    for (const r of results) {
+      const lyrics = await neteaseLyrics(r.id)
+      if (lyrics && !lyrics.isChineseOnly) return lyrics
+    }
+  }
+  return null
+}
+
+// ─── Enhanced searchAndSendLyrics ─────────────────────────
+
 async function searchAndSendLyrics(title, artist) {
+  // 1. 저장된 가사 선택이 있으면 우선 사용
+  const saved = getSavedLyricsSelection(currentMedia.videoId)
+  if (saved) {
+    const savedLyrics = await fetchLyricsById(saved.source, saved.id)
+    if (savedLyrics) {
+      currentLyrics = savedLyrics
+      sendLyricsToAll()
+      return
+    }
+  }
+
+  // 2. LRCLIB (8단계 폴백)
   currentLyrics = await fetchLyrics(title, artist)
 
+  // 3. Netease 폴백 (LRCLIB 실패 시)
+  if (!currentLyrics) {
+    console.log(`[Lyrics] LRCLIB 실패, Netease 폴백 시도...`)
+    currentLyrics = await fetchLyricsFromNetease(title, artist)
+  }
+
+  sendLyricsToAll()
+}
+
+function sendLyricsToAll() {
   // 메인 창에 전송
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('lyrics:update', currentLyrics)
@@ -2592,3 +2955,133 @@ function registerShortcuts() {
 function getIconPath() {
   return path.join(__dirname, 'assets', 'icon.png')
 }
+
+// ─── Auto Updater (electron-updater) ─────────────────────
+
+let autoUpdater = null
+
+function setupAutoUpdater() {
+  try {
+    autoUpdater = require('electron-updater').autoUpdater
+  } catch {
+    console.log('[Updater] electron-updater not installed, skipping auto-update')
+    return
+  }
+
+  const token = getConfig('updaterToken')
+  if (!token) {
+    console.log('[Updater] No updater token configured, skipping')
+    return
+  }
+
+  autoUpdater.setFeedURL({
+    provider: 'github',
+    owner: 'porock8409-pixel',
+    repo: 'youtube-music',
+    private: true,
+    token
+  })
+
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = true
+
+  autoUpdater.on('update-available', (info) => {
+    dialog.showMessageBox({
+      type: 'info',
+      title: '업데이트 가능',
+      message: `새 버전 ${info.version}이 있습니다. 다운로드하시겠습니까?`,
+      buttons: ['다운로드', '나중에'],
+      defaultId: 0
+    }).then(({ response }) => {
+      if (response === 0) autoUpdater.downloadUpdate()
+    })
+  })
+
+  autoUpdater.on('update-downloaded', () => {
+    dialog.showMessageBox({
+      type: 'info',
+      title: '업데이트 준비 완료',
+      message: '업데이트가 다운로드되었습니다. 지금 재시작하시겠습니까?',
+      buttons: ['재시작', '나중에'],
+      defaultId: 0
+    }).then(({ response }) => {
+      if (response === 0) autoUpdater.quitAndInstall()
+    })
+  })
+
+  autoUpdater.on('error', (err) => {
+    console.log('[Updater] Error:', err.message)
+  })
+}
+
+function checkForUpdates() {
+  if (!autoUpdater) return
+  autoUpdater.checkForUpdates().catch(() => {})
+}
+
+// ─── YouTube Login Detection ─────────────────────────────
+
+async function checkYoutubeLogin() {
+  try {
+    const cookies = await session.defaultSession.cookies.get({ domain: '.youtube.com' })
+    return cookies.some(c => c.name === 'SID' || c.name === 'SSID')
+  } catch {
+    return false
+  }
+}
+
+// ─── Onboarding (첫 실행 가이드) ─────────────────────────
+
+let onboardingWindow = null
+
+function showOnboarding() {
+  if (onboardingWindow && !onboardingWindow.isDestroyed()) {
+    onboardingWindow.focus()
+    return
+  }
+
+  onboardingWindow = new BrowserWindow({
+    width: 480,
+    height: 520,
+    frame: false,
+    resizable: false,
+    icon: getIconPath(),
+    backgroundColor: '#0f0f0f',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-ui.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  })
+
+  onboardingWindow.loadFile('renderer/onboarding.html')
+
+  onboardingWindow.on('closed', () => {
+    onboardingWindow = null
+  })
+}
+
+ipcMain.on('onboarding:login', () => {
+  // 메인 창 표시하여 YouTube 로그인
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show()
+    mainWindow.focus()
+  }
+})
+
+ipcMain.handle('youtube:check-login', async () => {
+  return checkYoutubeLogin()
+})
+
+ipcMain.on('onboarding:finish', () => {
+  setConfig('onboardingComplete', true)
+  if (onboardingWindow && !onboardingWindow.isDestroyed()) {
+    onboardingWindow.close()
+    onboardingWindow = null
+  }
+  // 메인 창 숨기고 미니 플레이어 표시
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.hide()
+  }
+  createMiniPlayer()
+})
