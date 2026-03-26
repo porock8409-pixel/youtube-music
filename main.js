@@ -932,9 +932,16 @@ function adjustYoutubeViewBoundsImmediate() {
 
 // ─── Mini Player ──────────────────────────────────────────
 
-function getWidgetPosition(width, height, margin = 12) {
+function getDisplayForWidget() {
   const { screen } = require('electron')
-  const display = screen.getPrimaryDisplay()
+  if (miniPlayerWindow && !miniPlayerWindow.isDestroyed()) {
+    return screen.getDisplayMatching(miniPlayerWindow.getBounds())
+  }
+  return screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+}
+
+function getWidgetPosition(width, height, margin = 12, targetDisplay) {
+  const display = targetDisplay || getDisplayForWidget()
   const workArea = display.workArea
   const position = getConfig('miniPlayer.position') || 'bottom-left'
 
@@ -1137,27 +1144,16 @@ function createMiniLyricsPopup(initialTab) {
     return
   }
 
-  // 미니플레이어 위치 기준으로 바로 위에 배치
+  // 미니플레이어 위치 기준으로 배치 (상단이면 아래, 하단이면 위)
   const POPUP_W = 360
   const POPUP_H = 320
-  const GAP = 8
-  let popupX, popupY
-
-  if (miniPlayerWindow && !miniPlayerWindow.isDestroyed()) {
-    const mpBounds = miniPlayerWindow.getBounds()
-    popupX = mpBounds.x
-    popupY = mpBounds.y - POPUP_H - GAP
-  } else {
-    const pos = getWidgetPosition(POPUP_W, POPUP_H)
-    popupX = pos.x
-    popupY = pos.y
-  }
+  const pos = getLyricsPopupPosition(POPUP_W, POPUP_H)
 
   miniLyricsPopup = new BrowserWindow({
     width: POPUP_W,
     height: POPUP_H,
-    x: popupX,
-    y: popupY,
+    x: pos.x,
+    y: pos.y,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -1207,24 +1203,45 @@ function closeMiniLyricsPopup() {
   }
 }
 
+function getLyricsPopupPosition(popupW, popupH) {
+  if (!miniPlayerWindow || miniPlayerWindow.isDestroyed()) {
+    const pos = getWidgetPosition(popupW, popupH)
+    return pos
+  }
+
+  const { screen } = require('electron')
+  const mpPos = miniPlayerWindow.getPosition()
+  const mpSize = MINI_SIZES[miniPlayerMode]
+  const display = screen.getDisplayNearestPoint({ x: mpPos[0] + mpSize.w / 2, y: mpPos[1] + mpSize.h / 2 })
+  const workArea = display.workArea
+  const GAP = 4
+
+  // 미니플레이어 위에 가사 팝업 공간이 있는지 확인
+  const spaceAbove = mpPos[1] - workArea.y
+  const showBelow = spaceAbove < popupH + GAP
+
+  return {
+    x: mpPos[0],
+    y: showBelow ? mpPos[1] + mpSize.h + GAP : mpPos[1] - popupH - GAP
+  }
+}
+
 function repositionLyricsPopup() {
   if (!miniLyricsPopup || miniLyricsPopup.isDestroyed()) return
-  if (!miniPlayerWindow || miniPlayerWindow.isDestroyed()) return
-  const mpBounds = miniPlayerWindow.getBounds()
-  const popupBounds = miniLyricsPopup.getBounds()
-  miniLyricsPopup.setBounds({
-    x: mpBounds.x,
-    y: mpBounds.y - popupBounds.height - 8,
-    width: popupBounds.width,
-    height: popupBounds.height
-  })
+  const POPUP_W = 360
+  const POPUP_H = 320
+  const pos = getLyricsPopupPosition(POPUP_W, POPUP_H)
+  miniLyricsPopup.setPosition(pos.x, pos.y)
 }
 
 function repositionWidget() {
   if (!miniPlayerWindow) return
+  // 이동 전 현재 디스플레이를 먼저 확정 → 같은 디스플레이 내에서 위치 재계산
+  const display = getDisplayForWidget()
   const bounds = miniPlayerWindow.getBounds()
-  const pos = getWidgetPosition(bounds.width, bounds.height)
+  const pos = getWidgetPosition(bounds.width, bounds.height, 12, display)
   miniPlayerWindow.setBounds({ ...bounds, x: pos.x, y: pos.y })
+  repositionLyricsPopup()
 }
 
 function setWidgetPosition(position) {
@@ -1792,6 +1809,11 @@ ipcMain.on('mini:move', (event, dx, dy) => {
   if (win && !win.isDestroyed()) {
     const [x, y] = win.getPosition()
     win.setPosition(x + dx, y + dy)
+    // 미니플레이어 드래그 시 가사 팝업도 함께 이동
+    if (win === miniPlayerWindow && miniLyricsPopup && !miniLyricsPopup.isDestroyed()) {
+      const [lx, ly] = miniLyricsPopup.getPosition()
+      miniLyricsPopup.setPosition(lx + dx, ly + dy)
+    }
   }
 })
 
@@ -2300,9 +2322,9 @@ ipcMain.on('mini:snap-check', (event) => {
   if (!win || win.isDestroyed()) return
 
   const { screen } = require('electron')
-  const display = screen.getPrimaryDisplay()
-  const workArea = display.workArea
   const bounds = win.getBounds()
+  const display = screen.getDisplayMatching(bounds)
+  const workArea = display.workArea
   const margin = 12
 
   // 4개 코너 위치 계산
