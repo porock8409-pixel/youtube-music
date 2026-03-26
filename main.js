@@ -2990,19 +2990,20 @@ function setupAutoUpdater() {
     return
   }
 
-  const token = getConfig('updaterToken')
-  if (!token) {
-    console.log('[Updater] No updater token configured, skipping')
-    return
-  }
-
-  autoUpdater.setFeedURL({
+  const feedConfig = {
     provider: 'github',
     owner: 'porock8409-pixel',
-    repo: 'youtube-music',
-    private: true,
-    token
-  })
+    repo: 'youtube-music'
+  }
+
+  // private 리포면 토큰 필요
+  const token = getConfig('updaterToken')
+  if (token) {
+    feedConfig.private = true
+    feedConfig.token = token
+  }
+
+  autoUpdater.setFeedURL(feedConfig)
 
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = true

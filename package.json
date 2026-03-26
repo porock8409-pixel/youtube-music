@@ -1,6 +1,6 @@
 {
   "name": "youtube-music",
-  "version": "3.4.1",
+  "version": "3.4.2",
   "description": "YouTube Music Desktop App",
   "type": "commonjs",
   "main": "main.js",
@@ -67,8 +67,7 @@
     "publish": {
       "provider": "github",
       "owner": "porock8409-pixel",
-      "repo": "youtube-music",
-      "private": true
+      "repo": "youtube-music"
     }
   }
 }
