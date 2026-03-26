@@ -1,6 +1,6 @@
 {
   "name": "youtube-music",
-  "version": "3.4.2",
+  "version": "3.4.3",
   "description": "YouTube Music Desktop App",
   "type": "commonjs",
   "main": "main.js",
@@ -55,7 +55,6 @@
       "assets/icon.png",
       "assets/icon.ico",
       "assets/tray.png",
-      "!node_modules",
       "!dist",
       "!.git"
     ],
