@@ -1494,7 +1494,7 @@ function buildSettingsSubmenu() {
       label: '업데이트 확인',
       click: () => {
         if (autoUpdater) {
-          checkForUpdates()
+          checkForUpdates(true)
         } else {
           dialog.showMessageBox({ type: 'info', message: 'electron-updater가 설치되지 않았습니다.' })
         }
@@ -3032,13 +3032,27 @@ function setupAutoUpdater() {
     })
   })
 
+  autoUpdater.on('update-not-available', () => {
+    if (_manualUpdateCheck) {
+      dialog.showMessageBox({ type: 'info', title: '업데이트', message: '현재 최신 버전입니다.' })
+      _manualUpdateCheck = false
+    }
+  })
+
   autoUpdater.on('error', (err) => {
     console.log('[Updater] Error:', err.message)
+    if (_manualUpdateCheck) {
+      dialog.showMessageBox({ type: 'error', title: '업데이트 오류', message: `업데이트 확인 실패: ${err.message}` })
+      _manualUpdateCheck = false
+    }
   })
 }
 
-function checkForUpdates() {
+let _manualUpdateCheck = false
+
+function checkForUpdates(manual = false) {
   if (!autoUpdater) return
+  _manualUpdateCheck = manual
   autoUpdater.checkForUpdates().catch(() => {})
 }
 
