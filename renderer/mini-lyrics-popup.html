@@ -59,7 +59,6 @@
       min-height: 0;
     }
     .tab-content.active { display: flex; }
-    #tab-lyrics { position: relative; }
 
     /* ─── 가사 ─── */
     .lyrics-body {
@@ -122,65 +121,6 @@
     }
     .sync-label:hover { color: rgba(255,255,255,0.6); }
     .sync-label.adjusted { color: #ff9944; }
-
-    /* ─── 다른 가사 버튼 ─── */
-    .lyrics-alt-btn {
-      background: rgba(255,255,255,0.08);
-      border: none;
-      color: rgba(255,255,255,0.4);
-      font-size: 9px;
-      font-family: inherit;
-      padding: 2px 8px;
-      border-radius: 4px;
-      cursor: pointer;
-      transition: all 0.15s;
-      margin-left: auto;
-    }
-    .lyrics-alt-btn:hover { background: rgba(255,255,255,0.15); color: rgba(255,255,255,0.8); }
-
-    /* ─── 후보 목록 오버레이 ─── */
-    .lyrics-candidates {
-      display: none;
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(18, 18, 18, 0.97);
-      flex-direction: column;
-      z-index: 10;
-    }
-    .lyrics-candidates.visible { display: flex; }
-    .lyrics-candidates-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 10px 12px 8px;
-      border-bottom: 1px solid rgba(255,255,255,0.06);
-      flex-shrink: 0;
-    }
-    .lyrics-candidates-title { font-size: 11px; color: rgba(255,255,255,0.7); font-weight: 600; }
-    .lyrics-candidates-close {
-      background: none; border: none; color: rgba(255,255,255,0.4);
-      font-size: 16px; cursor: pointer; padding: 0 4px;
-    }
-    .lyrics-candidates-close:hover { color: rgba(255,255,255,0.8); }
-    .lyrics-candidates-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
-    .lyrics-candidates-list::-webkit-scrollbar { width: 3px; }
-    .lyrics-candidates-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
-    .candidate-item { padding: 8px; border-radius: 6px; cursor: pointer; transition: background 0.15s; }
-    .candidate-item:hover { background: rgba(255,255,255,0.08); }
-    .candidate-item-title {
-      font-size: 11px; color: rgba(255,255,255,0.8);
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
-    .candidate-item-meta { font-size: 9px; color: rgba(255,255,255,0.35); margin-top: 2px; }
-    .candidate-item-meta .badge-synced { color: #4CAF50; font-weight: 600; }
-    .candidate-item-meta .badge-source { color: #888; margin-left: 4px; }
-    .candidate-item-preview {
-      font-size: 9px; color: rgba(255,255,255,0.2); margin-top: 3px;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
-    .candidate-empty, .candidate-loading {
-      font-size: 11px; color: rgba(255,255,255,0.25); text-align: center; padding-top: 40px;
-    }
 
     /* ─── 히스토리 ─── */
     .history-list {
@@ -729,19 +669,10 @@
       <div class="lyrics-body" id="lyrics-body">
         <div class="lyrics-placeholder">가사 없음</div>
       </div>
-      <!-- 후보 목록 오버레이 -->
-      <div class="lyrics-candidates" id="lyrics-candidates">
-        <div class="lyrics-candidates-header">
-          <span class="lyrics-candidates-title">다른 가사 선택</span>
-          <button class="lyrics-candidates-close" id="candidates-close">&times;</button>
-        </div>
-        <div class="lyrics-candidates-list" id="candidates-list"></div>
-      </div>
       <div class="sync-bar" id="sync-bar">
         <button class="sync-btn" id="sync-minus" title="가사 0.5초 앞으로">-0.5</button>
         <span class="sync-label" id="sync-label" title="클릭하면 초기화">±0.0s</span>
         <button class="sync-btn" id="sync-plus" title="가사 0.5초 뒤로">+0.5</button>
-        <button class="lyrics-alt-btn" id="lyrics-alt-btn" title="다른 가사 검색">다른 가사</button>
       </div>
     </div>
 
@@ -848,53 +779,6 @@
         const q = searchInput.value.trim()
         if (q) doSearch(q)
       })
-    })
-
-    // ─── 다른 가사 (후보 선택) ─────────────────────
-    const altBtn = document.getElementById('lyrics-alt-btn')
-    const candidatesPanel = document.getElementById('lyrics-candidates')
-    const candidatesList = document.getElementById('candidates-list')
-    const candidatesClose = document.getElementById('candidates-close')
-
-    function escapeHtml(str) {
-      return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    }
-
-    altBtn.addEventListener('click', async () => {
-      candidatesPanel.classList.add('visible')
-      candidatesList.innerHTML = '<div class="candidate-loading">LRCLIB + Netease 검색 중...</div>'
-
-      const candidates = await window.electronAPI.getLyricsCandidates()
-
-      if (!candidates.length) {
-        candidatesList.innerHTML = '<div class="candidate-empty">다른 가사를 찾을 수 없습니다</div>'
-        return
-      }
-
-      candidatesList.innerHTML = candidates.map(c => `
-        <div class="candidate-item" data-index="${c.index}">
-          <div class="candidate-item-title">${escapeHtml(c.trackName)}</div>
-          <div class="candidate-item-meta">
-            ${escapeHtml(c.artistName)}${c.albumName ? ' · ' + escapeHtml(c.albumName) : ''}
-            ${c.hasSynced ? ' <span class="badge-synced">SYNC</span>' : ''}
-            <span class="badge-source">${c.source === 'netease' ? 'Netease' : 'LRCLIB'}</span>
-            ${c.isChineseOnly ? ' <span class="badge-source" style="color:#e8a030">中文</span>' : ''}
-          </div>
-          ${c.preview ? `<div class="candidate-item-preview">${escapeHtml(c.preview)}</div>` : ''}
-        </div>
-      `).join('')
-    })
-
-    candidatesList.addEventListener('click', async (e) => {
-      const item = e.target.closest('.candidate-item')
-      if (!item) return
-      const index = parseInt(item.dataset.index)
-      await window.electronAPI.selectLyricsCandidate(index)
-      candidatesPanel.classList.remove('visible')
-    })
-
-    candidatesClose.addEventListener('click', () => {
-      candidatesPanel.classList.remove('visible')
     })
 
     // ─── 탭 전환 ─────────────────────────────────

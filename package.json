@@ -1,12 +1,12 @@
 {
   "name": "youtube-music",
-  "version": "3.3.0",
+  "version": "3.5.0",
   "description": "YouTube Music Desktop App",
   "type": "commonjs",
   "main": "main.js",
   "scripts": {
     "postinstall": "xattr -cr node_modules/electron/dist/Electron.app 2>/dev/null || true",
-    "start": "unset ELECTRON_RUN_AS_NODE && electron .",
+    "start": "electron .",
     "build": "electron-builder",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
@@ -14,8 +14,11 @@
   },
   "author": "rockuen",
   "license": "MIT",
+  "dependencies": {
+    "electron-updater": "^6.3.0"
+  },
   "devDependencies": {
-    "electron": "^33.4.11",
+    "electron": "^40.8.3",
     "electron-builder": "^25.0.0"
   },
   "build": {
@@ -27,12 +30,6 @@
     "asar": true,
     "compression": "maximum",
     "removePackageScripts": true,
-    "publish": {
-      "provider": "github",
-      "owner": "porock8409-pixel",
-      "repo": "youtube-music",
-      "private": true
-    },
     "win": {
       "icon": "assets/icon.ico",
       "target": [
@@ -114,9 +111,11 @@
     "electronLanguages": [
       "ko",
       "en-US"
-    ]
-  },
-  "dependencies": {
-    "electron-updater": "^6.8.3"
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "porock8409-pixel",
+      "repo": "youtube-music"
+    }
   }
 }

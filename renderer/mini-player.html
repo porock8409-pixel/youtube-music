@@ -766,19 +766,17 @@
 
     // 싱글클릭 → 가사 팝업 토글, 더블클릭 → 확장/컴팩트 전환
     let clickTimer = null
-    let dblClickGuard = false
     function isInteractiveTarget(e) {
       return e.target.closest('button') || e.target.closest('.progress') || e.target.closest('.ex-progress') || e.target.closest('.ex-controls') || e.target.closest('.widget-controls')
     }
 
     widget.addEventListener('click', (e) => {
       if (isInteractiveTarget(e)) return
-      if (dblClickGuard) return
       if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; return }
       clickTimer = setTimeout(() => {
         clickTimer = null
-        if (!dblClickGuard) window.electronAPI.toggleMiniLyrics()
-      }, 350)
+        window.electronAPI.toggleMiniLyrics()
+      }, 250)
     })
 
     widget.addEventListener('dblclick', (e) => {
@@ -786,9 +784,7 @@
       e.stopPropagation()
       if (isInteractiveTarget(e)) return
       if (clickTimer) { clearTimeout(clickTimer); clickTimer = null }
-      dblClickGuard = true
       window.electronAPI.toggleExpanded()
-      setTimeout(() => { dblClickGuard = false }, 400)
     })
 
     // 미들클릭 → 확장/컴팩트 전환

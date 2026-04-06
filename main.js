@@ -1,5 +1,4 @@
 const { app, BrowserWindow, BrowserView, Tray, Menu, ipcMain, globalShortcut, nativeImage, session, net, clipboard, dialog } = require('electron')
-const { autoUpdater } = require('electron-updater')
 const crypto = require('crypto')
 const path = require('path')
 const fs = require('fs')
@@ -97,46 +96,48 @@ function setSyncOffset(videoId, offset) {
   saveLyricsSync()
 }
 
-// ─── Lyrics Selection (곡별 가사 선택 기억) ──────────────
+// ─── Lyrics Selection Memory (곡별 가사 선택 기억) ────────
 
 let lyricsSelectionPath
-let lyricsSelection = {} // { [videoId]: { source: 'lrclib'|'netease', id: number } }
+let lyricsSelections = {} // { [videoId]: { source: 'lrclib'|'netease', id: number|string } }
 
 function loadLyricsSelection() {
   lyricsSelectionPath = path.join(app.getPath('userData'), 'lyrics-selection.json')
   try {
     if (fs.existsSync(lyricsSelectionPath)) {
-      lyricsSelection = JSON.parse(fs.readFileSync(lyricsSelectionPath, 'utf8'))
+      lyricsSelections = JSON.parse(fs.readFileSync(lyricsSelectionPath, 'utf8'))
     }
-  } catch { lyricsSelection = {} }
+  } catch { lyricsSelections = {} }
 }
 
 function saveLyricsSelection(videoId, source, id) {
-  lyricsSelection[videoId] = { source, id }
-  const keys = Object.keys(lyricsSelection)
-  if (keys.length > 500) delete lyricsSelection[keys[0]]
+  lyricsSelections[videoId] = { source, id }
+  // 최대 500개 유지 (FIFO 제거)
+  const keys = Object.keys(lyricsSelections)
+  if (keys.length > 500) {
+    delete lyricsSelections[keys[0]]
+  }
   try {
-    fs.writeFileSync(lyricsSelectionPath, JSON.stringify(lyricsSelection), 'utf8')
+    fs.writeFileSync(lyricsSelectionPath, JSON.stringify(lyricsSelections), 'utf8')
   } catch {}
 }
 
 function getSavedLyricsSelection(videoId) {
-  return lyricsSelection[videoId] || null
+  return lyricsSelections[videoId] || null
 }
 
 async function fetchLyricsById(source, id) {
   try {
     if (source === 'lrclib') {
-      const url = `https://lrclib.net/api/get/${id}`
-      const res = await net.fetch(url, {
+      const res = await net.fetch(`https://lrclib.net/api/get/${id}`, {
         headers: { 'User-Agent': 'YouTubeMusic Desktop App/1.0' }
       })
-      if (!res.ok) return null
       const r = await res.json()
       const lyrics = { plain: r.plainLyrics || '', synced: null, source: 'lrclib' }
       if (r.syncedLyrics) lyrics.synced = parseLRC(r.syncedLyrics)
       return lyrics
-    } else if (source === 'netease') {
+    }
+    if (source === 'netease') {
       return await neteaseLyrics(id)
     }
   } catch {}
@@ -645,13 +646,20 @@ if (!gotTheLock) {
     createTray()
     registerShortcuts()
 
-    // 첫 실행 시 온보딩 표시
+    // 해상도/모니터 변경 시 위젯 위치 재조정
+    const { screen } = require('electron')
+    screen.on('display-metrics-changed', repositionWidget)
+
+    // 온보딩 (첫 실행)
     if (!getConfig('onboardingComplete')) {
       showOnboarding()
     }
 
-    // 자동 업데이트 설정
+    // 자동 업데이터 설정
     setupAutoUpdater()
+    // 첫 업데이트 체크 (30초 후), 이후 6시간마다
+    setTimeout(checkForUpdates, 30 * 1000)
+    setInterval(checkForUpdates, 6 * 60 * 60 * 1000)
 
     // macOS: 앱 메뉴 설정 (Edit 메뉴 없으면 Cmd+C/V 미작동)
     if (process.platform === 'darwin') {
@@ -712,17 +720,13 @@ if (!gotTheLock) {
       Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate))
     }
 
-    // 해상도/모니터 변경 시 위젯 위치 재조정
-    const { screen } = require('electron')
-    screen.on('display-metrics-changed', repositionWidget)
-
     // 주기적 메모리 정리 (5분마다)
     setInterval(() => {
       if (global.gc) global.gc()
     }, 5 * 60 * 1000)
   })
 
-  // Dock/activate 클릭 시 미니 플레이어 표시 (메인 창은 항상 숨김)
+  // macOS: Dock/activate 클릭 시 미니 플레이어 표시
   app.on('activate', () => {
     createMiniPlayer()
   })
@@ -799,10 +803,12 @@ function createMainWindow() {
     }
   })
 
-  // 최소화 시 메인 창 숨기고 미니 플레이어 표시
+  // 최소화 시 자동으로 미니 플레이어 표시 + 작업표시줄에서 숨기기
   mainWindow.on('minimize', () => {
-    mainWindow.hide()
-    if (currentMedia.title) createMiniPlayer()
+    if (currentMedia.title) {
+      mainWindow.hide()
+      createMiniPlayer()
+    }
   })
 
   // 메인 창 복원 시 미니 플레이어 숨기기
@@ -998,9 +1004,16 @@ function adjustYoutubeViewBoundsImmediate() {
 
 // ─── Mini Player ──────────────────────────────────────────
 
-function getWidgetPosition(width, height, margin = 12) {
+function getDisplayForWidget() {
   const { screen } = require('electron')
-  const display = screen.getPrimaryDisplay()
+  if (miniPlayerWindow && !miniPlayerWindow.isDestroyed()) {
+    return screen.getDisplayMatching(miniPlayerWindow.getBounds())
+  }
+  return screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+}
+
+function getWidgetPosition(width, height, margin = 12, targetDisplay) {
+  const display = targetDisplay || getDisplayForWidget()
   const workArea = display.workArea
   const position = getConfig('miniPlayer.position') || 'bottom-left'
 
@@ -1205,27 +1218,16 @@ function createMiniLyricsPopup(initialTab) {
     return
   }
 
-  // 미니플레이어 위치 기준으로 바로 위에 배치
+  // 미니플레이어 위치 기준으로 배치 (상단이면 아래, 하단이면 위)
   const POPUP_W = 360
   const POPUP_H = 320
-  const GAP = 8
-  let popupX, popupY
-
-  if (miniPlayerWindow && !miniPlayerWindow.isDestroyed()) {
-    const mpBounds = miniPlayerWindow.getBounds()
-    popupX = mpBounds.x
-    popupY = mpBounds.y - POPUP_H - GAP
-  } else {
-    const pos = getWidgetPosition(POPUP_W, POPUP_H)
-    popupX = pos.x
-    popupY = pos.y
-  }
+  const pos = getLyricsPopupPosition(POPUP_W, POPUP_H)
 
   miniLyricsPopup = new BrowserWindow({
     width: POPUP_W,
     height: POPUP_H,
-    x: popupX,
-    y: popupY,
+    x: pos.x,
+    y: pos.y,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -1277,24 +1279,45 @@ function closeMiniLyricsPopup() {
   }
 }
 
+function getLyricsPopupPosition(popupW, popupH) {
+  if (!miniPlayerWindow || miniPlayerWindow.isDestroyed()) {
+    const pos = getWidgetPosition(popupW, popupH)
+    return pos
+  }
+
+  const { screen } = require('electron')
+  const mpPos = miniPlayerWindow.getPosition()
+  const mpSize = MINI_SIZES[miniPlayerMode]
+  const display = screen.getDisplayNearestPoint({ x: mpPos[0] + mpSize.w / 2, y: mpPos[1] + mpSize.h / 2 })
+  const workArea = display.workArea
+  const GAP = 4
+
+  // 미니플레이어 위에 가사 팝업 공간이 있는지 확인
+  const spaceAbove = mpPos[1] - workArea.y
+  const showBelow = spaceAbove < popupH + GAP
+
+  return {
+    x: mpPos[0],
+    y: showBelow ? mpPos[1] + mpSize.h + GAP : mpPos[1] - popupH - GAP
+  }
+}
+
 function repositionLyricsPopup() {
   if (!miniLyricsPopup || miniLyricsPopup.isDestroyed()) return
-  if (!miniPlayerWindow || miniPlayerWindow.isDestroyed()) return
-  const mpBounds = miniPlayerWindow.getBounds()
-  const popupBounds = miniLyricsPopup.getBounds()
-  miniLyricsPopup.setBounds({
-    x: mpBounds.x,
-    y: mpBounds.y - popupBounds.height - 8,
-    width: popupBounds.width,
-    height: popupBounds.height
-  })
+  const POPUP_W = 360
+  const POPUP_H = 320
+  const pos = getLyricsPopupPosition(POPUP_W, POPUP_H)
+  miniLyricsPopup.setPosition(pos.x, pos.y)
 }
 
 function repositionWidget() {
   if (!miniPlayerWindow) return
+  // 이동 전 현재 디스플레이를 먼저 확정 → 같은 디스플레이 내에서 위치 재계산
+  const display = getDisplayForWidget()
   const bounds = miniPlayerWindow.getBounds()
-  const pos = getWidgetPosition(bounds.width, bounds.height)
+  const pos = getWidgetPosition(bounds.width, bounds.height, 12, display)
   miniPlayerWindow.setBounds({ ...bounds, x: pos.x, y: pos.y })
+  repositionLyricsPopup()
 }
 
 function setWidgetPosition(position) {
@@ -1312,155 +1335,6 @@ function toggleMiniPlayer() {
   }
 }
 
-// ─── Auto Updater ────────────────────────────────────────
-
-// 읽기 전용 토큰 (Fine-grained PAT, repo contents read-only)
-// GitHub > Settings > Developer settings > Fine-grained PAT > repo: read-only
-const UPDATER_TOKEN = getConfig('updaterToken') || ''
-
-let updateStatus = 'idle' // idle, checking, available, downloading, ready, error
-
-function setupAutoUpdater() {
-  if (!UPDATER_TOKEN) {
-    console.log('[Update] 업데이트 토큰 미설정 — 자동 업데이트 비활성')
-    return
-  }
-
-  autoUpdater.autoDownload = false
-  autoUpdater.autoInstallOnAppQuit = true
-
-  autoUpdater.setFeedURL({
-    provider: 'github',
-    owner: 'porock8409-pixel',
-    repo: 'youtube-music',
-    private: true,
-    token: UPDATER_TOKEN
-  })
-
-  // 앱 시작 30초 후 업데이트 확인, 이후 6시간마다
-  setTimeout(() => checkForUpdates(), 30000)
-  setInterval(() => checkForUpdates(), 6 * 60 * 60 * 1000)
-
-  autoUpdater.on('checking-for-update', () => {
-    updateStatus = 'checking'
-    console.log('[Update] 업데이트 확인 중...')
-  })
-
-  autoUpdater.on('update-available', (info) => {
-    updateStatus = 'available'
-    console.log(`[Update] 새 버전 발견: v${info.version}`)
-    dialog.showMessageBox({
-      type: 'info',
-      title: '업데이트 가능',
-      message: `새 버전 v${info.version}이 있습니다.`,
-      detail: '다운로드를 시작하시겠습니까?',
-      buttons: ['다운로드', '나중에'],
-      defaultId: 0
-    }).then(({ response }) => {
-      if (response === 0) {
-        autoUpdater.downloadUpdate()
-        updateStatus = 'downloading'
-      }
-    })
-  })
-
-  autoUpdater.on('update-not-available', () => {
-    updateStatus = 'idle'
-    console.log('[Update] 최신 버전입니다.')
-  })
-
-  autoUpdater.on('download-progress', (progress) => {
-    console.log(`[Update] 다운로드 ${Math.round(progress.percent)}%`)
-  })
-
-  autoUpdater.on('update-downloaded', () => {
-    updateStatus = 'ready'
-    console.log('[Update] 다운로드 완료. 재시작 시 설치됩니다.')
-    dialog.showMessageBox({
-      type: 'info',
-      title: '업데이트 준비 완료',
-      message: '업데이트가 다운로드되었습니다.',
-      detail: '지금 재시작하여 설치하시겠습니까?',
-      buttons: ['재시작', '나중에'],
-      defaultId: 0
-    }).then(({ response }) => {
-      if (response === 0) {
-        app.isQuitting = true
-        autoUpdater.quitAndInstall()
-      }
-    })
-  })
-
-  autoUpdater.on('error', (err) => {
-    updateStatus = 'error'
-    console.log(`[Update] 오류: ${err.message}`)
-  })
-}
-
-function checkForUpdates() {
-  if (!UPDATER_TOKEN) return
-  autoUpdater.checkForUpdates().catch(() => {})
-}
-
-// ─── Onboarding (첫 실행 가이드) ─────────────────────────
-
-let onboardingWindow = null
-
-function showOnboarding() {
-  if (onboardingWindow && !onboardingWindow.isDestroyed()) {
-    onboardingWindow.show()
-    onboardingWindow.focus()
-    return
-  }
-
-  onboardingWindow = new BrowserWindow({
-    width: 480,
-    height: 520,
-    frame: process.platform === 'darwin' ? true : false,
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : undefined,
-    resizable: false,
-    maximizable: false,
-    fullscreenable: false,
-    backgroundColor: '#0f0f0f',
-    icon: getIconPath(),
-    webPreferences: {
-      preload: path.join(__dirname, 'preload-ui.js'),
-      contextIsolation: true,
-      nodeIntegration: false
-    }
-  })
-
-  onboardingWindow.loadFile('renderer/onboarding.html')
-  onboardingWindow.once('ready-to-show', () => onboardingWindow.show())
-  onboardingWindow.on('closed', () => { onboardingWindow = null })
-}
-
-ipcMain.on('onboarding:login', () => {
-  // 메인 창을 보여서 YouTube 로그인
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    if (process.platform === 'darwin') app.dock?.show()
-    mainWindow.show()
-    mainWindow.focus()
-  }
-})
-
-ipcMain.handle('youtube:check-login', async () => {
-  return await checkYoutubeLogin()
-})
-
-ipcMain.on('onboarding:finish', () => {
-  setConfig('onboardingComplete', true)
-  if (onboardingWindow && !onboardingWindow.isDestroyed()) {
-    onboardingWindow.close()
-  }
-  // 메인 창 숨기기 (로그인 후 돌아왔을 수 있으므로)
-  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
-    mainWindow.hide()
-    if (process.platform === 'darwin') app.dock?.hide()
-  }
-  createMiniPlayer()
-})
-
 // ─── System Tray ──────────────────────────────────────────
 
 function createTray() {
@@ -1468,50 +1342,30 @@ function createTray() {
   if (process.platform === 'darwin') {
     // macOS: Template Image (메뉴바 다크/라이트 모드 자동 대응)
     icon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'tray.png'))
-    icon = icon.resize({ width: 16, height: 16 })
     icon.setTemplateImage(true)
   } else {
-    icon = nativeImage.createFromPath(getIconPath())
-    icon = icon.resize({ width: 16, height: 16 })
+    icon = nativeImage.createFromPath(getIconPath()).resize({ width: 16, height: 16 })
   }
   tray = new Tray(icon)
   tray.setToolTip('YouTube Music')
   updateTrayMenu()
 
-  if (process.platform === 'darwin') {
-    // macOS: 좌클릭 → 미니플레이어 토글, 우클릭 → 컨텍스트 메뉴
-    tray.on('click', () => {
-      toggleMiniPlayer()
-    })
-    tray.on('right-click', () => {
-      tray.popUpContextMenu()
-    })
-  } else {
-    // Windows: 좌클릭 → 미니플레이어, 우클릭 → 메뉴
-    tray.on('click', () => {
-      createMiniPlayer()
-    })
-    tray.on('right-click', () => {
-      tray.popUpContextMenu()
-    })
-  }
+  // 좌클릭 → 미니플레이어 토글 (메뉴 안 뜸)
+  tray.on('click', () => {
+    createMiniPlayer()
+  })
+
+  // 우클릭 → 컨텍스트 메뉴
+  tray.on('right-click', () => {
+    tray.popUpContextMenu()
+  })
 }
 
 function truncate(str, max) {
   return str.length > max ? str.slice(0, max - 1) + '…' : str
 }
 
-async function checkYoutubeLogin() {
-  try {
-    const cookies = await session.defaultSession.cookies.get({ domain: '.youtube.com' })
-    return cookies.some(c => c.name === 'SID' || c.name === 'SSID')
-  } catch { return false }
-}
-
-let ytLoggedIn = false
-
-async function updateTrayMenu() {
-  ytLoggedIn = await checkYoutubeLogin()
+function updateTrayMenu() {
   const MAX_LEN = 24
   const hasMedia = !!currentMedia.title
   const songTitle = hasMedia ? truncate(currentMedia.title, MAX_LEN) : '재생 중인 곡 없음'
@@ -1526,13 +1380,6 @@ async function updateTrayMenu() {
     template.push({ label: songArtist, enabled: false })
   }
   template.push({ type: 'separator' })
-
-  // 미니플레이어 토글
-  const miniVisible = miniPlayerWindow && !miniPlayerWindow.isDestroyed() && miniPlayerWindow.isVisible()
-  template.push({
-    label: miniVisible ? '미니플레이어 닫기' : '미니플레이어 열기',
-    click: () => toggleMiniPlayer()
-  })
 
   template.push({ type: 'separator' })
 
@@ -1681,30 +1528,6 @@ function buildSettingsSubmenu() {
     },
     { type: 'separator' },
     {
-      label: ytLoggedIn ? 'YouTube 계정: 로그인됨' : 'YouTube 로그인',
-      enabled: !ytLoggedIn,
-      click: () => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          if (process.platform === 'darwin') app.dock?.show()
-          mainWindow.show()
-          mainWindow.focus()
-        }
-      }
-    },
-    {
-      label: '기능 안내',
-      click: () => showOnboarding()
-    },
-    {
-      label: '업데이트 확인',
-      enabled: !!UPDATER_TOKEN,
-      click: () => {
-        checkForUpdates()
-        dialog.showMessageBox({ type: 'info', title: '업데이트', message: '업데이트를 확인하고 있습니다...' })
-      }
-    },
-    { type: 'separator' },
-    {
       label: '실험적 기능',
       submenu: [
         {
@@ -1719,7 +1542,7 @@ function buildSettingsSubmenu() {
         {
           label: '메인창 열기',
           click: () => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
+            if (mainWindow) {
               if (process.platform === 'darwin') app.dock?.show()
               mainWindow.show()
               if (mainWindow.isMinimized()) mainWindow.restore()
@@ -1731,10 +1554,35 @@ function buildSettingsSubmenu() {
     },
     { type: 'separator' },
     {
-      label: '종료',
+      label: 'YouTube 로그인 상태 확인',
+      click: async () => {
+        const loggedIn = await checkYoutubeLogin()
+        dialog.showMessageBox({
+          type: 'info',
+          title: 'YouTube 로그인',
+          message: loggedIn ? '✅ YouTube에 로그인되어 있습니다.' : '❌ YouTube에 로그인되어 있지 않습니다.\n메인창에서 로그인하세요.',
+          buttons: loggedIn ? ['확인'] : ['메인창 열기', '취소']
+        }).then(({ response }) => {
+          if (!loggedIn && response === 0 && mainWindow) {
+            if (process.platform === 'darwin') app.dock?.show()
+            mainWindow.show()
+            mainWindow.focus()
+          }
+        })
+      }
+    },
+    {
+      label: '온보딩 다시 보기',
+      click: () => showOnboarding()
+    },
+    {
+      label: '업데이트 확인',
       click: () => {
-        app.isQuitting = true
-        app.quit()
+        if (autoUpdater) {
+          checkForUpdates(true)
+        } else {
+          dialog.showMessageBox({ type: 'info', message: 'electron-updater가 설치되지 않았습니다.' })
+        }
       }
     }
   ]
@@ -1961,115 +1809,6 @@ ipcMain.on('control:seek', (_, time) => {
   `).catch(() => {})
 })
 
-// ─── 가사 후보 목록 (LRCLIB + Netease) ──────────────────
-
-let lastLyricsCandidates = [] // 마지막 검색의 전체 후보 캐싱
-
-ipcMain.handle('lyrics:get-candidates', async () => {
-  if (!currentMedia.title) return []
-
-  const title = currentMedia.title
-  const artist = currentMedia.artist || ''
-  const cleanedTitle = cleanTrackTitle(title)
-  const cleanedArtist = cleanArtistName(artist)
-  const candidates = []
-
-  // LRCLIB 후보
-  try {
-    const params = new URLSearchParams({ q: `${cleanedTitle} ${cleanedArtist}` })
-    const res = await net.fetch(`https://lrclib.net/api/search?${params.toString()}`, {
-      headers: { 'User-Agent': 'YouTubeMusic Desktop App/1.0' }
-    })
-    const results = await res.json()
-    if (Array.isArray(results)) {
-      results.slice(0, 10).forEach(r => {
-        candidates.push({
-          source: 'lrclib',
-          id: r.id,
-          trackName: r.trackName || '',
-          artistName: r.artistName || '',
-          albumName: r.albumName || '',
-          hasSynced: !!r.syncedLyrics,
-          preview: (r.plainLyrics || '').slice(0, 80),
-          _raw: r
-        })
-      })
-    }
-  } catch {}
-
-  // Netease 후보 (중국어 전용도 포함, 하위 순위로)
-  try {
-    const songs = await neteaseSearch(cleanedTitle, cleanedArtist)
-    for (const song of songs.slice(0, 8)) {
-      const lyrics = await neteaseLyrics(song.id)
-      if (lyrics && (lyrics.synced || lyrics.plain)) {
-        candidates.push({
-          source: 'netease',
-          id: song.id,
-          trackName: song.name,
-          artistName: song.artist,
-          albumName: song.album,
-          hasSynced: !!lyrics.synced,
-          isChineseOnly: !!lyrics.isChineseOnly,
-          preview: (lyrics.plain || '').slice(0, 80),
-          _raw: lyrics
-        })
-      }
-    }
-  } catch {}
-
-  // 중국어 전용 가사를 하위 순위로 정렬
-  candidates.sort((a, b) => (a.isChineseOnly ? 1 : 0) - (b.isChineseOnly ? 1 : 0))
-
-  lastLyricsCandidates = candidates
-
-  // renderer에는 _raw 제외하고 전송
-  return candidates.map((c, i) => ({
-    index: i,
-    source: c.source,
-    id: c.id,
-    trackName: c.trackName,
-    artistName: c.artistName,
-    albumName: c.albumName,
-    hasSynced: c.hasSynced,
-    isChineseOnly: c.isChineseOnly,
-    preview: c.preview
-  }))
-})
-
-ipcMain.handle('lyrics:select-candidate', async (_, index) => {
-  const candidate = lastLyricsCandidates[index]
-  if (!candidate) return false
-
-  let lyrics
-  if (candidate.source === 'netease') {
-    lyrics = candidate._raw // 이미 파싱된 가사
-  } else {
-    const raw = candidate._raw
-    lyrics = { plain: raw.plainLyrics || '', synced: null, source: 'lrclib' }
-    if (raw.syncedLyrics) lyrics.synced = parseLRC(raw.syncedLyrics)
-  }
-
-  currentLyrics = lyrics
-
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('lyrics:update', currentLyrics)
-  }
-  if (miniLyricsPopup && !miniLyricsPopup.isDestroyed()) {
-    miniLyricsPopup.webContents.send('lyrics:update', currentLyrics)
-    miniLyricsPopup.webContents.send('lyrics:sync-offset', 0)
-  }
-
-  // 선택 저장 + 싱크 오프셋 초기화
-  if (currentMedia.videoId) {
-    saveLyricsSelection(currentMedia.videoId, candidate.source, candidate.id)
-    lyricsSync[currentMedia.videoId] = 0
-    saveLyricsSync()
-  }
-
-  return true
-})
-
 // ─── 가사 싱크 오프셋 조절 ───────────────────────────────
 ipcMain.on('lyrics:adjust-sync', (_, delta) => {
   const videoId = currentMedia.videoId
@@ -2155,55 +1894,12 @@ ipcMain.on('mini:move', (event, dx, dy) => {
   if (win && !win.isDestroyed()) {
     const [x, y] = win.getPosition()
     win.setPosition(x + dx, y + dy)
-  }
-})
-
-// 드래그 종료 시 코너 스냅 체크
-ipcMain.handle('mini:snap-check', (event) => {
-  const win = BrowserWindow.fromWebContents(event.sender)
-  if (!win || win.isDestroyed()) return null
-
-  const { screen } = require('electron')
-  const display = screen.getPrimaryDisplay()
-  const workArea = display.workArea
-  const [wx, wy] = win.getPosition()
-  const [ww, wh] = win.getSize()
-  const margin = 12
-  const snapDist = 60 // 스냅 감지 거리 (px)
-
-  // 4개 코너 위치 계산
-  const corners = {
-    'top-left':     { x: workArea.x + margin, y: workArea.y + margin },
-    'top-right':    { x: workArea.x + workArea.width - ww - margin, y: workArea.y + margin },
-    'bottom-left':  { x: workArea.x + margin, y: workArea.y + workArea.height - wh - margin },
-    'bottom-right': { x: workArea.x + workArea.width - ww - margin, y: workArea.y + workArea.height - wh - margin }
-  }
-
-  // 가장 가까운 코너 찾기
-  let nearest = null
-  let minDist = Infinity
-  for (const [pos, corner] of Object.entries(corners)) {
-    const dist = Math.sqrt((wx - corner.x) ** 2 + (wy - corner.y) ** 2)
-    if (dist < minDist) {
-      minDist = dist
-      nearest = { pos, x: corner.x, y: corner.y }
+    // 미니플레이어 드래그 시 가사 팝업도 함께 이동
+    if (win === miniPlayerWindow && miniLyricsPopup && !miniLyricsPopup.isDestroyed()) {
+      const [lx, ly] = miniLyricsPopup.getPosition()
+      miniLyricsPopup.setPosition(lx + dx, ly + dy)
     }
   }
-
-  if (nearest && minDist <= snapDist) {
-    win.setPosition(nearest.x, nearest.y)
-    setConfig('miniPlayer.position', nearest.pos)
-    return nearest.pos
-  }
-  return null
-})
-
-// Escape 키로 원래 위치 복귀
-ipcMain.on('mini:reset-position', () => {
-  if (!miniPlayerWindow || miniPlayerWindow.isDestroyed()) return
-  const size = MINI_SIZES[miniPlayerMode]
-  const pos = getWidgetPosition(size.w, size.h)
-  miniPlayerWindow.setPosition(pos.x, pos.y)
 })
 
 // 무음 토글
@@ -2638,6 +2334,121 @@ function parseInnerTubeResults(json) {
   return results.slice(0, 15).map(({ _isOfficial, _viewCount, ...rest }) => rest)
 }
 
+// ─── 가사 후보 선택 ───────────────────────────────────────
+
+ipcMain.handle('lyrics:get-candidates', async () => {
+  const title = currentMedia.title
+  const artist = currentMedia.artist || ''
+  if (!title) return []
+
+  const candidates = []
+  const cleanedTitle = cleanTrackTitle(title)
+  const cleanedArtist = cleanArtistName(artist)
+
+  // LRCLIB 후보
+  try {
+    const params = new URLSearchParams({ track_name: cleanedTitle, artist_name: cleanedArtist })
+    const url = `https://lrclib.net/api/search?${params.toString()}`
+    const res = await net.fetch(url, { headers: { 'User-Agent': 'YouTubeMusic Desktop App/1.0' } })
+    const results = await res.json()
+    for (const r of results.slice(0, 10)) {
+      candidates.push({
+        source: 'lrclib',
+        id: r.id,
+        trackName: r.trackName,
+        artistName: r.artistName,
+        albumName: r.albumName || '',
+        hasSynced: !!r.syncedLyrics,
+        isChineseOnly: false
+      })
+    }
+  } catch {}
+
+  // Netease 후보
+  try {
+    const results = await neteaseSearch(cleanedTitle, cleanedArtist)
+    for (const r of results.slice(0, 10)) {
+      const lyrics = await neteaseLyrics(r.id)
+      candidates.push({
+        source: 'netease',
+        id: r.id,
+        trackName: r.name,
+        artistName: r.artist,
+        albumName: r.album,
+        hasSynced: !!lyrics?.synced,
+        isChineseOnly: lyrics?.isChineseOnly || false
+      })
+    }
+  } catch {}
+
+  // 중국어 전용 결과를 뒤로 정렬
+  candidates.sort((a, b) => (a.isChineseOnly ? 1 : 0) - (b.isChineseOnly ? 1 : 0))
+
+  return candidates
+})
+
+ipcMain.on('lyrics:select-candidate', async (_, { source, id }) => {
+  const videoId = currentMedia.videoId
+  if (!videoId) return
+
+  const lyrics = await fetchLyricsById(source, id)
+  if (lyrics) {
+    currentLyrics = lyrics
+    saveLyricsSelection(videoId, source, id)
+    setSyncOffset(videoId, 0)
+    sendLyricsToAll()
+  }
+})
+
+// ─── 코너 스내핑 ──────────────────────────────────────────
+
+ipcMain.on('mini:snap-check', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return
+
+  const { screen } = require('electron')
+  const bounds = win.getBounds()
+  const display = screen.getDisplayMatching(bounds)
+  const workArea = display.workArea
+  const margin = 12
+
+  // 4개 코너 위치 계산
+  const corners = {
+    'top-left': { x: workArea.x + margin, y: workArea.y + margin },
+    'top-right': { x: workArea.x + workArea.width - bounds.width - margin, y: workArea.y + margin },
+    'bottom-left': { x: workArea.x + margin, y: workArea.y + workArea.height - bounds.height - margin },
+    'bottom-right': { x: workArea.x + workArea.width - bounds.width - margin, y: workArea.y + workArea.height - bounds.height - margin }
+  }
+
+  // 가장 가까운 코너 찾기
+  let nearest = null
+  let minDist = Infinity
+  for (const [name, pos] of Object.entries(corners)) {
+    const dist = Math.sqrt(Math.pow(bounds.x - pos.x, 2) + Math.pow(bounds.y - pos.y, 2))
+    if (dist < minDist) {
+      minDist = dist
+      nearest = { name, ...pos }
+    }
+  }
+
+  // 60px 이내면 스냅
+  if (nearest && minDist <= 60) {
+    win.setPosition(nearest.x, nearest.y)
+    setConfig('miniPlayer.position', nearest.name)
+    // 가사 팝업도 함께 이동
+    repositionLyricsPopup()
+  }
+})
+
+ipcMain.on('mini:reset-position', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return
+  const bounds = win.getBounds()
+  const pos = getWidgetPosition(bounds.width, bounds.height)
+  win.setPosition(pos.x, pos.y)
+  repositionLyricsPopup()
+})
+
 // 즐겨찾기 추가
 ipcMain.on('favorite:add', () => addFavorite())
 ipcMain.on('favorite:toggle', () => toggleFavorite())
@@ -2840,7 +2651,6 @@ function cleanArtistName(artist) {
   return artist
     .replace(/^OFFICIAL[_\s-]+/i, '')        // "OFFICIAL_NELL" → "NELL"
     .replace(/\s*[-–]\s*Topic$/i, '')        // "Artist - Topic" → "Artist"
-    .replace(/\s*[-–]\s*주제$/i, '')         // "Artist - 주제" → "Artist"
     .replace(/VEVO$/i, '')                    // "ArtistVEVO" → "Artist"
     .replace(/\s*Official$/i, '')             // "Artist Official" → "Artist"
     .replace(/\s*[\(\[]Official[)\]]/gi, '')  // "Artist (Official)" → "Artist"
@@ -2860,102 +2670,6 @@ function titleMatch(a, b) {
   const matched = wordsB.filter(w => na.includes(w)).length
   return matched / wordsB.length
 }
-
-// ─── Netease Cloud Music 가사 검색 ───────────────────────
-
-async function neteaseSearch(title, artist) {
-  try {
-    const query = `${title} ${artist}`.trim()
-    const params = new URLSearchParams({ s: query, limit: '10', type: '1', offset: '0' })
-    const res = await net.fetch('https://music.163.com/api/search/get/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Referer': 'https://music.163.com',
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)'
-      },
-      body: params.toString()
-    })
-    const data = await res.json()
-    if (!data.result?.songs?.length) return []
-    return data.result.songs.slice(0, 10).map(s => ({
-      id: s.id,
-      name: s.name,
-      artist: (s.artists || []).map(a => a.name).join(', '),
-      album: s.album?.name || ''
-    }))
-  } catch {
-    return []
-  }
-}
-
-async function neteaseLyrics(songId) {
-  try {
-    const url = `https://music.163.com/api/song/lyric?os=osx&id=${songId}&lv=-1&kv=-1&tv=-1`
-    const res = await net.fetch(url, {
-      headers: {
-        'Referer': 'https://music.163.com',
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)'
-      }
-    })
-    const data = await res.json()
-    if (!data.lrc?.lyric) return null
-    const lrcText = data.lrc.lyric
-
-    // 중국어 가사 감지
-    const plainText = lrcText.replace(/\[.*?\]/g, '').trim()
-    const hasChinese = /[\u4E00-\u9FFF]/.test(plainText)
-    const hasKorean = /[\uAC00-\uD7AF\u1100-\u11FF]/.test(plainText)
-    const isChineseOnly = hasChinese && !hasKorean
-
-    const lyrics = { plain: '', synced: null, source: 'netease', isChineseOnly }
-    const parsed = parseLRC(lrcText)
-    if (parsed) {
-      lyrics.synced = parsed
-      lyrics.plain = parsed.map(l => l.text).join('\n')
-    } else {
-      lyrics.plain = plainText
-    }
-    return lyrics
-  } catch {
-    return null
-  }
-}
-
-async function fetchLyricsFromNetease(title, artist) {
-  // 여러 검색어 변형으로 시도
-  const queries = [[title, artist]]
-
-  // 괄호 안 한글에서 아티스트-제목 추출
-  const koreanInParens = title.match(/[\(\[]([\uAC00-\uD7AF\u1100-\u11FF].*?)[\)\]]/)
-  if (koreanInParens) {
-    const kText = koreanInParens[1].trim()
-    const kParts = extractArtistFromTitle(kText)
-    if (kParts) {
-      queries.push([kParts[0].track, kParts[0].artist])
-    } else {
-      queries.push([kText, artist])
-    }
-  }
-
-  // 채널명 괄호 분리
-  const artistParen = cleanArtistName(artist).match(/^(.+?)\s*[\(\[](.+?)[\)\]]/)
-  if (artistParen) {
-    queries.push([title, artistParen[1].trim()])
-    queries.push([title, artistParen[2].trim()])
-  }
-
-  for (const [q_title, q_artist] of queries) {
-    const songs = await neteaseSearch(q_title, q_artist)
-    for (const song of songs.slice(0, 3)) {
-      const lyrics = await neteaseLyrics(song.id)
-      if (lyrics && (lyrics.synced || lyrics.plain) && !lyrics.isChineseOnly) return lyrics
-    }
-  }
-  return null
-}
-
-// ─── LRCLIB 가사 검색 ────────────────────────────────────
 
 async function lrclibSearch(params, expectedTrack, expectedArtist) {
   try {
@@ -3108,114 +2822,54 @@ async function fetchLyrics(title, artist) {
     if (result) return result
   }
 
-  // 7단계: 괄호 안 한글 텍스트에서 아티스트-제목 추출
-  // 예: "chow chow-No matter... (챠우챠우-아무리 막아도...)"
-  // 괄호가 잘려있을 수도 있으므로 닫는 괄호 없이도 매칭
-  const koreanInParens = title.match(/[\(\[]([\uAC00-\uD7AF\u1100-\u11FF][^)\]]*?)(?:[\)\]]|\.{2,}|$)/)
+  // 7단계: 한글 괄호 내용 추출 + 하이픈 분리
+  const koreanInParens = title.match(/[\(\[]([\uAC00-\uD7AF\s]+)[\)\]]/)
   if (koreanInParens) {
-    let koreanText = koreanInParens[1].replace(/\.{2,}$/, '').trim()
-    console.log(`[Lyrics] 7단계: 괄호 한글 발견: "${koreanText}"`)
+    const koTitle = koreanInParens[1].trim()
+    result = await lrclibSearch(new URLSearchParams({
+      track_name: koTitle, artist_name: cleanedArtist
+    }), koTitle, cleanedArtist)
+    if (result) return result
 
-    // 하이픈으로 분리: "챠우챠우-아무리 막아도" → 앞부분이 제목일 수도, 아티스트일 수도 있음
-    const hyphenSplit = koreanText.match(/^([\uAC00-\uD7AF\u1100-\u11FF\w]+)\s*[-]\s*([\uAC00-\uD7AF\u1100-\u11FF].+)/)
-    if (hyphenSplit) {
-      const part1 = hyphenSplit[1].trim()  // "챠우챠우"
-      const part2 = hyphenSplit[2].trim()  // "아무리 막아도..."
-      console.log(`[Lyrics] 7단계: 하이픈 분리 → "${part1}" / "${part2}"`)
-
-      // 해석1: part1이 곡 제목 (채널명이 아티스트)
-      result = await lrclibSearch(new URLSearchParams({
-        track_name: part1, artist_name: cleanedArtist
-      }), part1, cleanedArtist)
-      if (result) return result
-      // 아티스트 괄호 분리해서도 시도
-      const ap = cleanedArtist.match(/^(.+?)\s*[\(\[](.+?)[\)\]]/)
-      if (ap) {
-        for (const av of [ap[1].trim(), ap[2].trim()]) {
+    // 7-1: 한글 제목에서도 하이픈 분리 시도
+    const koParts = extractArtistFromTitle(koTitle)
+    if (koParts) {
+      for (const { artist: tA, track: tT } of koParts) {
+        if (tT.length > 1 && tA.length > 0) {
           result = await lrclibSearch(new URLSearchParams({
-            track_name: part1, artist_name: av
-          }), part1, av)
+            track_name: tT, artist_name: tA
+          }), tT, tA)
           if (result) return result
         }
       }
-      // q 통합 검색
-      result = await lrclibSearch(new URLSearchParams({ q: `${part1} ${cleanedArtist}` }), part1)
-      if (result) return result
-
-      // 해석2: part1이 아티스트, part2가 제목
-      result = await lrclibSearch(new URLSearchParams({
-        track_name: part2, artist_name: part1
-      }), part2, part1)
-      if (result) return result
-      result = await lrclibSearch(new URLSearchParams({ q: `${part1} ${part2}` }), part2, part1)
-      if (result) return result
-    }
-
-    // extractArtistFromTitle (공백 있는 구분자)
-    const koreanParts = extractArtistFromTitle(koreanText)
-    if (koreanParts) {
-      for (const { artist: kArtist, track: kTrack } of koreanParts) {
-        if (kTrack.length > 1) {
-          result = await lrclibSearch(new URLSearchParams({
-            track_name: kTrack, artist_name: kArtist
-          }), kTrack, kArtist)
-          if (result) return result
-          result = await lrclibSearch(new URLSearchParams({ track_name: kTrack }), kTrack)
-          if (result) return result
-        }
-      }
-    } else if (koreanText.length > 1 && !hyphenSplit) {
-      result = await lrclibSearch(new URLSearchParams({ track_name: koreanText }), koreanText)
-      if (result) return result
     }
   }
 
-  // 7-1단계: 영문 제목에서도 "artist-title" 패턴 추출 (공백 없는 하이픈)
-  // 예: "chow chow-No matter how hard..."
-  const engHyphenSplit = cleanedTitle.match(/^(.+?)\s*-\s*([A-Za-z].{5,})/)
-  if (engHyphenSplit) {
-    const eArtist = engHyphenSplit[1].trim()
-    const eTrack = engHyphenSplit[2].replace(/\s*[\(\[].*$/, '').trim()
-    if (eArtist.length > 1 && eTrack.length > 3) {
-      console.log(`[Lyrics] 7-1단계: 영문 분리 → "${eArtist}" / "${eTrack}"`)
-      result = await lrclibSearch(new URLSearchParams({
-        track_name: eTrack, artist_name: eArtist
-      }), eTrack, eArtist)
-      if (result) return result
-      result = await lrclibSearch(new URLSearchParams({ q: `${eArtist} ${eTrack}` }), eTrack)
-      if (result) return result
+  // 7-2: 영문 하이픈 분리 (cleanedTitle에서)
+  const enParts = extractArtistFromTitle(cleanedTitle)
+  if (enParts && !titleParts) {
+    for (const { artist: tA, track: tT } of enParts) {
+      if (tT.length > 1 && tA.length > 0) {
+        result = await lrclibSearch(new URLSearchParams({
+          track_name: tT, artist_name: tA
+        }), tT, tA)
+        if (result) return result
+      }
     }
   }
 
-  // 8단계: 채널명에서 괄호 안/밖 각각으로 재검색
-  // 예: "델리 스파이스(Deli Spice)" → "델리 스파이스" 또는 "Deli Spice"
-  const artistParenMatch = cleanedArtist.match(/^(.+?)\s*[\(\[](.+?)[\)\]]/)
-  if (artistParenMatch) {
-    const artistVariants = [artistParenMatch[1].trim(), artistParenMatch[2].trim()]
-    console.log(`[Lyrics] 8단계: 아티스트 변형 → ${artistVariants.join(', ')}`)
-
-    // 7단계에서 추출한 한글 제목/아티스트와 조합
-    const titleVariants = [cleanedTitle, bareTitle].filter(Boolean)
-    if (koreanInParens) {
-      const kt = koreanInParens[1].replace(/\.{2,}$/, '').trim()
-      const hs = kt.match(/^([\uAC00-\uD7AF\u1100-\u11FF\w]+)\s*[-]\s*([\uAC00-\uD7AF\u1100-\u11FF].+)/)
-      if (hs) titleVariants.push(hs[2].trim())
-    }
-
-    for (const av of artistVariants) {
-      for (const tv of titleVariants) {
-        if (av.length > 0 && tv.length > 1) {
-          result = await lrclibSearch(new URLSearchParams({
-            track_name: tv, artist_name: av
-          }), tv, av)
-          if (result) return result
-        }
+  // 8단계: 아티스트 괄호 변형 (예: "G-DRAGON (지드래곤)" → "G-DRAGON" / "지드래곤")
+  const artistParens = (artist || '').match(/[\(\[](.*?)[\)\]]/)
+  if (artistParens) {
+    const innerArtist = artistParens[1].trim()
+    const outerArtist = artist.replace(/\s*[\(\[][^\)\]]*[\)\]]/g, '').trim()
+    for (const tryArtist of [innerArtist, outerArtist]) {
+      if (tryArtist) {
+        result = await lrclibSearch(new URLSearchParams({
+          track_name: cleanedTitle, artist_name: tryArtist
+        }), cleanedTitle, tryArtist)
+        if (result) return result
       }
-      // q 파라미터 통합 검색
-      result = await lrclibSearch(new URLSearchParams({
-        q: `${cleanedTitle} ${av}`
-      }), cleanedTitle)
-      if (result) return result
     }
   }
 
@@ -3238,49 +2892,118 @@ function parseLRC(lrcText) {
   return lines.length ? lines : null
 }
 
-async function searchAndSendLyrics(title, artist) {
-  console.log(`[Lyrics] 검색 시작: "${title}" / "${artist}"`)
-  console.log(`[Lyrics] cleaned: "${cleanTrackTitle(title)}" / "${cleanArtistName(artist)}"`)
+// ─── Netease Lyrics (폴백 가사 소스) ──────────────────────
 
+async function neteaseSearch(title, artist) {
+  try {
+    const query = artist ? `${artist} ${title}` : title
+    const url = `https://music.163.com/api/search/get/web?s=${encodeURIComponent(query)}&type=1&limit=10`
+    const res = await net.fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Referer': 'https://music.163.com'
+      }
+    })
+    const json = await res.json()
+    const songs = json?.result?.songs || []
+    return songs.map(s => ({
+      id: s.id,
+      name: s.name,
+      artist: s.artists?.map(a => a.name).join(', ') || '',
+      album: s.album?.name || ''
+    }))
+  } catch {
+    return []
+  }
+}
+
+async function neteaseLyrics(songId) {
+  try {
+    const url = `https://music.163.com/api/song/lyric?id=${songId}&lv=1&kv=1&tv=-1`
+    const res = await net.fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Referer': 'https://music.163.com'
+      }
+    })
+    const json = await res.json()
+    const lrcText = json?.lrc?.lyric || ''
+    if (!lrcText) return null
+
+    // 중국어 전용 가사 감지 (한글 없이 중국어만 있으면 스킵)
+    const hasChinese = /[\u4e00-\u9fff]/.test(lrcText)
+    const hasKorean = /[\uAC00-\uD7AF\u1100-\u11FF]/.test(lrcText)
+    const isChineseOnly = hasChinese && !hasKorean
+
+    const lyrics = { plain: lrcText.replace(/\[\d{2}:\d{2}\.\d{2,3}\]/g, '').trim(), synced: null, source: 'netease', isChineseOnly }
+    const synced = parseLRC(lrcText)
+    if (synced) lyrics.synced = synced
+    return lyrics
+  } catch {
+    return null
+  }
+}
+
+async function fetchLyricsFromNetease(title, artist) {
+  const queries = []
+
+  // 원본 제목+아티스트
+  queries.push({ title, artist })
+
+  // 한글 괄호 내용 추출 (예: "제목 (한글제목)" → "한글제목")
+  const koreanInParens = title.match(/[\(\[]([\uAC00-\uD7AF\s]+)[\)\]]/)
+  if (koreanInParens) {
+    queries.push({ title: koreanInParens[1].trim(), artist })
+  }
+
+  // 아티스트 괄호 변형
+  const bareArtist = (artist || '').replace(/\s*[\(\[][^\)\]]*[\)\]]/g, '').trim()
+  if (bareArtist && bareArtist !== artist) {
+    queries.push({ title, artist: bareArtist })
+  }
+
+  for (const q of queries) {
+    const results = await neteaseSearch(q.title, q.artist)
+    for (const r of results) {
+      const lyrics = await neteaseLyrics(r.id)
+      if (lyrics && !lyrics.isChineseOnly) return lyrics
+    }
+  }
+  return null
+}
+
+// ─── Enhanced searchAndSendLyrics ─────────────────────────
+
+async function searchAndSendLyrics(title, artist) {
   // 1. 저장된 가사 선택이 있으면 우선 사용
   const saved = getSavedLyricsSelection(currentMedia.videoId)
   if (saved) {
-    console.log(`[Lyrics] 저장된 선택 발견: ${saved.source} #${saved.id}`)
     const savedLyrics = await fetchLyricsById(saved.source, saved.id)
     if (savedLyrics) {
       currentLyrics = savedLyrics
-      console.log(`[Lyrics] 저장된 가사 로드 성공`)
       sendLyricsToAll()
       return
     }
   }
 
-  // 2. LRCLIB 검색
-  console.log(`[Lyrics] LRCLIB 검색 중...`)
+  // 2. LRCLIB (8단계 폴백)
   currentLyrics = await fetchLyrics(title, artist)
-  if (currentLyrics) {
-    console.log(`[Lyrics] LRCLIB 성공 (synced: ${!!currentLyrics.synced})`)
-  } else {
-    console.log(`[Lyrics] LRCLIB 실패, Netease 폴백...`)
-  }
 
-  // 3. LRCLIB 실패 시 Netease 폴백
+  // 3. Netease 폴백 (LRCLIB 실패 시)
   if (!currentLyrics) {
+    console.log(`[Lyrics] LRCLIB 실패, Netease 폴백 시도...`)
     currentLyrics = await fetchLyricsFromNetease(title, artist)
-    if (currentLyrics) {
-      console.log(`[Lyrics] Netease 성공 (synced: ${!!currentLyrics.synced})`)
-    } else {
-      console.log(`[Lyrics] Netease도 실패 — 가사 없음`)
-    }
   }
 
   sendLyricsToAll()
 }
 
 function sendLyricsToAll() {
+  // 메인 창에 전송
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('lyrics:update', currentLyrics)
   }
+  // 가사 팝업에 전송 + 저장된 싱크 오프셋
   if (miniLyricsPopup && !miniLyricsPopup.isDestroyed()) {
     miniLyricsPopup.webContents.send('lyrics:update', currentLyrics)
     const offset = getSyncOffset(currentMedia.videoId)
@@ -3345,3 +3068,151 @@ function registerShortcuts() {
 function getIconPath() {
   return path.join(__dirname, 'assets', 'icon.png')
 }
+
+// ─── Auto Updater (electron-updater) ─────────────────────
+
+let autoUpdater = null
+
+function setupAutoUpdater() {
+  try {
+    autoUpdater = require('electron-updater').autoUpdater
+  } catch {
+    console.log('[Updater] electron-updater not installed, skipping auto-update')
+    return
+  }
+
+  const feedConfig = {
+    provider: 'github',
+    owner: 'porock8409-pixel',
+    repo: 'youtube-music'
+  }
+
+  // private 리포면 토큰 필요
+  const token = getConfig('updaterToken')
+  if (token) {
+    feedConfig.private = true
+    feedConfig.token = token
+  }
+
+  autoUpdater.setFeedURL(feedConfig)
+
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = true
+
+  autoUpdater.on('update-available', (info) => {
+    dialog.showMessageBox({
+      type: 'info',
+      title: '업데이트 가능',
+      message: `새 버전 ${info.version}이 있습니다. 다운로드하시겠습니까?`,
+      buttons: ['다운로드', '나중에'],
+      defaultId: 0
+    }).then(({ response }) => {
+      if (response === 0) autoUpdater.downloadUpdate()
+    })
+  })
+
+  autoUpdater.on('update-downloaded', () => {
+    dialog.showMessageBox({
+      type: 'info',
+      title: '업데이트 준비 완료',
+      message: '업데이트가 다운로드되었습니다. 지금 재시작하시겠습니까?',
+      buttons: ['재시작', '나중에'],
+      defaultId: 0
+    }).then(({ response }) => {
+      if (response === 0) autoUpdater.quitAndInstall()
+    })
+  })
+
+  autoUpdater.on('update-not-available', () => {
+    if (_manualUpdateCheck) {
+      dialog.showMessageBox({ type: 'info', title: '업데이트', message: '현재 최신 버전입니다.' })
+      _manualUpdateCheck = false
+    }
+  })
+
+  autoUpdater.on('error', (err) => {
+    console.log('[Updater] Error:', err.message)
+    if (_manualUpdateCheck) {
+      dialog.showMessageBox({ type: 'error', title: '업데이트 오류', message: `업데이트 확인 실패: ${err.message}` })
+      _manualUpdateCheck = false
+    }
+  })
+}
+
+let _manualUpdateCheck = false
+
+function checkForUpdates(manual = false) {
+  if (!autoUpdater) return
+  _manualUpdateCheck = manual
+  autoUpdater.checkForUpdates().catch(() => {})
+}
+
+// ─── YouTube Login Detection ─────────────────────────────
+
+async function checkYoutubeLogin() {
+  try {
+    const cookies = await session.defaultSession.cookies.get({ domain: '.youtube.com' })
+    return cookies.some(c => c.name === 'SID' || c.name === 'SSID')
+  } catch {
+    return false
+  }
+}
+
+// ─── Onboarding (첫 실행 가이드) ─────────────────────────
+
+let onboardingWindow = null
+
+function showOnboarding() {
+  if (onboardingWindow && !onboardingWindow.isDestroyed()) {
+    onboardingWindow.focus()
+    return
+  }
+
+  onboardingWindow = new BrowserWindow({
+    width: 480,
+    height: 520,
+    frame: process.platform === 'darwin' ? true : false,
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : undefined,
+    resizable: false,
+    icon: getIconPath(),
+    backgroundColor: '#0f0f0f',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-ui.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  })
+
+  onboardingWindow.loadFile('renderer/onboarding.html')
+
+  onboardingWindow.on('closed', () => {
+    onboardingWindow = null
+  })
+}
+
+ipcMain.on('onboarding:login', () => {
+  // 메인 창 표시하여 YouTube 로그인
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (process.platform === 'darwin') app.dock?.show()
+    mainWindow.show()
+    mainWindow.focus()
+  }
+})
+
+ipcMain.handle('youtube:check-login', async () => {
+  return checkYoutubeLogin()
+})
+
+ipcMain.on('onboarding:finish', () => {
+  setConfig('onboardingComplete', true)
+  if (onboardingWindow && !onboardingWindow.isDestroyed()) {
+    onboardingWindow.close()
+    onboardingWindow = null
+  }
+  // 메인 창 숨기고 미니 플레이어 표시
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.hide()
+  }
+  if (process.platform === 'darwin') app.dock?.hide()
+  createMiniPlayer()
+})
