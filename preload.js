@@ -104,24 +104,12 @@ function extractMetadata() {
 let lastIsMuted = null
 let lastVolume = null
 
-function extractPlayState() {
-  const video = document.querySelector('video')
-  if (!video) return
-
-  const isPlaying = !video.paused
-  if (isPlaying !== lastIsPlaying) {
-    lastIsPlaying = isPlaying
-    ipcRenderer.send('media:state-changed', { isPlaying })
-  }
-
-  // 무음 상태 감지
+function emitVolumeState(video) {
   const isMuted = video.muted || video.volume === 0
   if (isMuted !== lastIsMuted) {
     lastIsMuted = isMuted
     ipcRenderer.send('media:mute-changed', { isMuted })
   }
-
-  // 볼륨 감지
   const volume = Math.round(video.volume * 100)
   if (volume !== lastVolume) {
     lastVolume = volume
@@ -216,6 +204,24 @@ function attachVideoListeners() {
       ipcRenderer.send('media:ended')
     }
   })
+  video.addEventListener('volumechange', () => emitVolumeState(video))
+  video.addEventListener('loadedmetadata', () => extractProgress())
+
+  // 진행률: timeupdate 이벤트 기반 (500ms throttle — 기존 0.5초 폴링과 동일한 빈도이지만 DOM 재쿼리 없음)
+  let lastProgressSent = 0
+  video.addEventListener('timeupdate', () => {
+    const now = Date.now()
+    if (now - lastProgressSent < 500) return
+    lastProgressSent = now
+    extractProgress()
+  })
+
+  // 초기 상태 동기화 (이미 재생 중이거나 볼륨이 설정된 상태로 video가 생성된 경우)
+  emitVolumeState(video)
+  if (!video.paused && lastIsPlaying !== true) {
+    lastIsPlaying = true
+    ipcRenderer.send('media:state-changed', { isPlaying: true })
+  }
 }
 
 // ─── 광고 자동 스킵 ──────────────────────────────────────
@@ -280,18 +286,46 @@ function ensureAutoplay() {
 }
 
 function startObserving() {
-  // 메타데이터 + 재생상태 + video 리스너 + 플레이리스트 (1초 간격, 단일 타이머)
+  // 재생상태/볼륨/진행률은 video element 이벤트로 이동 → 더 이상 폴링 대상 아님
+  // 메타/플레이리스트/광고/자동재생은 2초 폴링 유지 (1초 → 2초)
+  //  · YouTube SPA는 DOM mutation을 초당 수백 번 발생시켜 MutationObserver가 오히려 CPU를 더 쓸 수 있음
+  //  · attachVideoListeners는 여기서도 호출 — video 요소가 SPA 전환으로 재생성되면 새 요소에 리스너 재부착
   setInterval(() => {
-    extractMetadata()
-    extractPlayState()
     attachVideoListeners()
+    extractMetadata()
     extractPlaylistInfo()
     skipAds()
     ensureAutoplay()
-  }, 1000)
+  }, 2000)
 
-  // 프로그레스만 별도 (0.5초)
-  setInterval(extractProgress, 500)
+  // SPA 네비게이션 즉시 반응 — URL 변경 시 자동재생 플래그 리셋 + 메타 재검사
+  const onLocationChange = () => {
+    autoplayChecked = false
+    setTimeout(() => {
+      attachVideoListeners()
+      extractMetadata()
+      extractPlaylistInfo()
+      ensureAutoplay()
+    }, 300)
+  }
+  const origPushState = history.pushState
+  history.pushState = function (...args) {
+    const result = origPushState.apply(this, args)
+    onLocationChange()
+    return result
+  }
+  const origReplaceState = history.replaceState
+  history.replaceState = function (...args) {
+    const result = origReplaceState.apply(this, args)
+    onLocationChange()
+    return result
+  }
+  window.addEventListener('popstate', onLocationChange)
+
+  // 첫 실행 즉시 1회
+  attachVideoListeners()
+  extractMetadata()
+  extractPlaylistInfo()
 }
 
 // 페이지 로드 후 시작 (SPA 네비게이션 고려하여 지연)
