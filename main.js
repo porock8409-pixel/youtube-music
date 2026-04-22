@@ -866,6 +866,8 @@ function createYoutubeView() {
   // 백그라운드 오디오 유지
   youtubeView.webContents.setAudioMuted(false)
   youtubeView.webContents.setMaxListeners(20)
+  // 프레임 레이트 상한 30fps — 음악 플레이어 UI는 대부분 정적 (앨범아트/가사)이라 60fps 불필요
+  youtubeView.webContents.setFrameRate(30)
 
   mainWindow.setBrowserView(youtubeView)
   adjustYoutubeViewBoundsImmediate()
