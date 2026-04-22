@@ -795,21 +795,26 @@
       }
     })
 
-    // JS 드래그 (Alt+드래그로 이동, 놓으면 코너 스냅)
+    // JS 드래그 (macOS: Cmd+드래그 / Windows: Alt+드래그)
     let dragging = false
     let dragStart = { x: 0, y: 0 }
+    const isMacMini = navigator.platform.includes('Mac') || navigator.userAgent.includes('Macintosh')
+
+    function hasDragModifier(e) {
+      return isMacMini ? e.metaKey : e.altKey
+    }
 
     widget.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return
       if (e.target.closest('button')) return
-      if (!e.altKey) return  // Alt 키 필요
+      if (!hasDragModifier(e)) return
       dragging = true
       dragStart = { x: e.screenX, y: e.screenY }
     })
 
     window.addEventListener('mousemove', (e) => {
       if (!dragging) return
-      if (!e.altKey) { dragging = false; return }
+      if (!hasDragModifier(e)) { dragging = false; return }
       const dx = e.screenX - dragStart.x
       const dy = e.screenY - dragStart.y
       dragStart = { x: e.screenX, y: e.screenY }

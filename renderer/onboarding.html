@@ -6,7 +6,7 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: 'Segoe UI', -apple-system, system-ui, sans-serif;
+      font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
       background: #0f0f0f;
       color: #fff;
       overflow: hidden;
@@ -129,7 +129,7 @@
 </head>
 <body>
   <div class="titlebar">
-    <button class="titlebar-close" onclick="finish()" title="닫기">&#10005;</button>
+    <button class="titlebar-close" id="titlebar-close-btn" onclick="finish()" title="닫기">&#10005;</button>
   </div>
 
   <div class="slides" id="slides">
@@ -222,7 +222,7 @@
       <div class="slide-icon">&#9989;</div>
       <div class="slide-title">준비 완료!</div>
       <div class="slide-desc">
-        <strong>시스템 트레이 아이콘</strong>을 클릭하면 미니 플레이어가 나타납니다.<br>
+        <strong id="tray-label">시스템 트레이 아이콘</strong>을 클릭하면 미니 플레이어가 나타납니다.<br>
         우클릭하면 설정 메뉴를 볼 수 있어요.<br><br>
         음악을 재생하면 미니 플레이어에 곡 정보가 표시됩니다.
       </div>
@@ -240,14 +240,16 @@
   </div>
 
   <script>
+    const isMac = navigator.platform.includes('Mac') || navigator.userAgent.includes('Macintosh')
     let current = 0
     const totalSlides = 6
 
     const shortcutsEl = document.getElementById('shortcuts-list')
+    const mod = isMac ? '⌘' : 'Ctrl'
     const shortcuts = [
-      ['미니플레이어 토글', 'Ctrl+M'],
-      ['가사 보기', 'Ctrl+L'],
-      ['미니플레이어 이동', 'Alt+드래그'],
+      ['미니플레이어 토글', isMac ? '⌘⇧M' : 'Ctrl+M'],
+      ['가사 보기', `${mod}+L`],
+      ['미니플레이어 이동', isMac ? '⌘+드래그' : 'Alt+드래그'],
       ['원래 위치로 복귀', 'Esc'],
       ['더블클릭', '확장/컴팩트 전환'],
       ['싱글클릭', '가사 팝업 토글']
@@ -294,6 +296,14 @@
         }
       }
     }
+    // macOS: 트레이 라벨 변경 + 닫기 버튼 숨기기 (트래픽 라이트 사용)
+    if (isMac) {
+      const trayLabel = document.getElementById('tray-label')
+      if (trayLabel) trayLabel.textContent = '상단 메뉴바 아이콘'
+      const closeBtn = document.getElementById('titlebar-close-btn')
+      if (closeBtn) closeBtn.style.display = 'none'
+    }
+
     setInterval(checkLogin, 3000)
     checkLogin()
   </script>

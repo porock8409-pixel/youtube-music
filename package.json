@@ -1,12 +1,15 @@
 {
   "name": "youtube-music",
-  "version": "3.4.4",
+  "version": "3.5.0",
   "description": "YouTube Music Desktop App",
   "type": "commonjs",
   "main": "main.js",
   "scripts": {
+    "postinstall": "xattr -cr node_modules/electron/dist/Electron.app 2>/dev/null || true",
     "start": "electron .",
     "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
     "build:dir": "electron-builder --dir"
   },
   "author": "rockuen",
@@ -47,6 +50,51 @@
     "portable": {
       "artifactName": "YouTube Music.exe"
     },
+    "mac": {
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.music",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "darkModeSupport": true,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "title": "YouTube Music",
+      "artifactName": "YouTube-Music-${version}-${arch}.dmg",
+      "window": {
+        "width": 540,
+        "height": 380
+      },
+      "icon": "assets/icon.icns",
+      "iconSize": 80,
+      "contents": [
+        {
+          "x": 140,
+          "y": 190
+        },
+        {
+          "x": 400,
+          "y": 190,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
     "files": [
       "main.js",
       "preload.js",
@@ -54,6 +102,7 @@
       "renderer/**/*",
       "assets/icon.png",
       "assets/icon.ico",
+      "assets/icon.icns",
       "assets/tray.png",
       "!dist",
       "!.git"

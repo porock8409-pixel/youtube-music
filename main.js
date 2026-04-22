@@ -5,10 +5,10 @@ const fs = require('fs')
 const https = require('https')
 const http = require('http')
 
-// ─── Performance: V8 메모리 제한 & GPU 최적화 ────────────
-app.commandLine.appendSwitch('js-flags', '--max-old-space-size=128')
-app.commandLine.appendSwitch('disable-gpu-compositing')        // GPU 메모리 절약
-app.commandLine.appendSwitch('disable-software-rasterizer')    // 소프트웨어 래스터라이저 비활성
+// ─── Performance: 백그라운드 재생 유지 ──────────────────
+// GPU 컴포지팅은 활성 상태 유지 (Windows/Mac 공통): 끄면 모든 페인트가 CPU로 떨어짐
+// V8 old space 기본값 사용: 128MB 제한은 YouTube 페이지에서 GC 쓰래싱 유발
+app.commandLine.appendSwitch('disable-software-rasterizer')    // 소프트웨어 래스터라이저 비활성 (GPU 있으면 무관)
 app.commandLine.appendSwitch('disable-background-timer-throttling') // 백그라운드 타이머 유지 (음악 재생)
 app.commandLine.appendSwitch('disable-renderer-backgrounding')      // 렌더러 백그라운드 제한 해제
 
@@ -619,6 +619,9 @@ if (!gotTheLock) {
   })
 
   app.whenReady().then(() => {
+    // macOS: Dock 아이콘 숨기기 (트레이 전용 앱)
+    if (process.platform === 'darwin') app.dock?.hide()
+
     loadConfig()
     loadHistory()
     loadLyricsSync()
@@ -656,10 +659,74 @@ if (!gotTheLock) {
     setTimeout(checkForUpdates, 30 * 1000)
     setInterval(checkForUpdates, 6 * 60 * 60 * 1000)
 
+    // macOS: 앱 메뉴 설정 (Edit 메뉴 없으면 Cmd+C/V 미작동)
+    if (process.platform === 'darwin') {
+      const menuTemplate = [
+        {
+          label: app.name,
+          submenu: [
+            { role: 'about' },
+            { type: 'separator' },
+            { role: 'hide' },
+            { role: 'hideOthers' },
+            { role: 'unhide' },
+            { type: 'separator' },
+            { role: 'quit' }
+          ]
+        },
+        {
+          label: 'Edit',
+          submenu: [
+            { role: 'undo' },
+            { role: 'redo' },
+            { type: 'separator' },
+            { role: 'cut' },
+            { role: 'copy' },
+            { role: 'paste' },
+            { role: 'selectAll' }
+          ]
+        },
+        {
+          label: 'Controls',
+          submenu: [
+            { label: '미니플레이어 토글', accelerator: 'Cmd+Shift+M', click: () => toggleMiniPlayer() },
+            { label: '가사 토글', accelerator: 'Cmd+L', click: () => {
+              lyricsVisible = !lyricsVisible
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('lyrics:visibility', lyricsVisible)
+                adjustYoutubeViewBoundsImmediate()
+              }
+            }},
+            { type: 'separator' },
+            { label: '재생/일시정지', click: () => sendToYoutube('control:play-pause') },
+            { label: '다음 곡', click: () => sendToYoutube('control:next') },
+            { label: '이전 곡', click: () => sendToYoutube('control:prev') }
+          ]
+        },
+        {
+          label: 'Window',
+          submenu: [
+            { role: 'minimize' },
+            { role: 'zoom' },
+            { type: 'separator' },
+            { role: 'front' },
+            { type: 'separator' },
+            { role: 'togglefullscreen' }
+          ]
+        }
+      ]
+      Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate))
+    }
+
     // 주기적 메모리 정리 (5분마다)
     setInterval(() => {
       if (global.gc) global.gc()
     }, 5 * 60 * 1000)
+  })
+
+  // macOS: Dock/activate 클릭 시 미니 플레이어 표시
+  app.on('activate', () => {
+    createMiniPlayer()
   })
 }
 
@@ -702,7 +769,9 @@ function createMainWindow() {
     y: winY,
     minWidth: 1280,
     minHeight: 720,
-    frame: false,
+    frame: process.platform === 'darwin' ? true : false,
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : undefined,
+    trafficLightPosition: process.platform === 'darwin' ? { x: 12, y: 12 } : undefined,
     icon: getIconPath(),
     backgroundColor: '#0f0f0f',
     show: false,
@@ -710,7 +779,6 @@ function createMainWindow() {
       preload: path.join(__dirname, 'preload-ui.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      backgroundThrottling: false,
       spellcheck: false,
       enableWebSQL: false,
       v8CacheOptions: 'bypassHeatCheck'
@@ -725,9 +793,10 @@ function createMainWindow() {
   })
 
   mainWindow.on('close', (e) => {
-    if (!app.isQuitting && getConfig('closeToTray')) {
+    if (!app.isQuitting) {
       e.preventDefault()
       mainWindow.hide()
+      if (process.platform === 'darwin') app.dock?.hide()
     }
   })
 
@@ -980,6 +1049,8 @@ function createMiniPlayer() {
     maximizable: false,
     fullscreenable: false,
     focusable: true,
+    hasShadow: true,
+    vibrancy: process.platform === 'darwin' ? 'ultra-dark' : undefined,
     icon: getIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload-ui.js'),
@@ -1162,6 +1233,8 @@ function createMiniLyricsPopup(initialTab) {
     maximizable: false,
     fullscreenable: false,
     focusable: true,
+    hasShadow: true,
+    vibrancy: process.platform === 'darwin' ? 'ultra-dark' : undefined,
     icon: getIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload-ui.js'),
@@ -1262,8 +1335,15 @@ function toggleMiniPlayer() {
 // ─── System Tray ──────────────────────────────────────────
 
 function createTray() {
-  const icon = nativeImage.createFromPath(getIconPath())
-  tray = new Tray(icon.resize({ width: 16, height: 16 }))
+  let icon
+  if (process.platform === 'darwin') {
+    // macOS: Template Image (메뉴바 다크/라이트 모드 자동 대응)
+    icon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'tray.png'))
+    icon.setTemplateImage(true)
+  } else {
+    icon = nativeImage.createFromPath(getIconPath()).resize({ width: 16, height: 16 })
+  }
+  tray = new Tray(icon)
   tray.setToolTip('YouTube Music')
   updateTrayMenu()
 
@@ -1460,6 +1540,7 @@ function buildSettingsSubmenu() {
           label: '메인창 열기',
           click: () => {
             if (mainWindow) {
+              if (process.platform === 'darwin') app.dock?.show()
               mainWindow.show()
               if (mainWindow.isMinimized()) mainWindow.restore()
               mainWindow.focus()
@@ -1480,6 +1561,7 @@ function buildSettingsSubmenu() {
           buttons: loggedIn ? ['확인'] : ['메인창 열기', '취소']
         }).then(({ response }) => {
           if (!loggedIn && response === 0 && mainWindow) {
+            if (process.platform === 'darwin') app.dock?.show()
             mainWindow.show()
             mainWindow.focus()
           }
@@ -2959,7 +3041,10 @@ function sendToYoutube(channel, data) {
 }
 
 function registerShortcuts() {
-  globalShortcut.register('CommandOrControl+M', toggleMiniPlayer)
+  // macOS: Cmd+M은 시스템 "창 최소화"와 충돌 → Cmd+Shift+M 사용
+  const miniKey = process.platform === 'darwin' ? 'Command+Shift+M' : 'Control+M'
+  globalShortcut.register(miniKey, toggleMiniPlayer)
+
   globalShortcut.register('CommandOrControl+L', () => {
     lyricsVisible = !lyricsVisible
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -2969,9 +3054,12 @@ function registerShortcuts() {
       if (wasPlaying) restorePlayback()
     }
   })
-  globalShortcut.register('CommandOrControl+W', () => {
-    if (mainWindow && mainWindow.isVisible()) mainWindow.hide()
-  })
+  // macOS: Cmd+W는 시스템이 처리 (close 이벤트 → hide). Windows만 등록
+  if (process.platform !== 'darwin') {
+    globalShortcut.register('Control+W', () => {
+      if (mainWindow && mainWindow.isVisible()) mainWindow.hide()
+    })
+  }
 }
 
 function getIconPath() {
@@ -3080,7 +3168,8 @@ function showOnboarding() {
   onboardingWindow = new BrowserWindow({
     width: 480,
     height: 520,
-    frame: false,
+    frame: process.platform === 'darwin' ? true : false,
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : undefined,
     resizable: false,
     icon: getIconPath(),
     backgroundColor: '#0f0f0f',
@@ -3101,6 +3190,7 @@ function showOnboarding() {
 ipcMain.on('onboarding:login', () => {
   // 메인 창 표시하여 YouTube 로그인
   if (mainWindow && !mainWindow.isDestroyed()) {
+    if (process.platform === 'darwin') app.dock?.show()
     mainWindow.show()
     mainWindow.focus()
   }
@@ -3120,5 +3210,6 @@ ipcMain.on('onboarding:finish', () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.hide()
   }
+  if (process.platform === 'darwin') app.dock?.hide()
   createMiniPlayer()
 })
