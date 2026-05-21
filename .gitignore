@@ -1,5 +1,7 @@
 node_modules/
 dist/
+dist2/
 backup-*/
 *.exe
 .omc/
+.vscode/

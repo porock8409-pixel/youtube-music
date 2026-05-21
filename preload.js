@@ -272,17 +272,20 @@ ipcRenderer.on('set-custom-queue', (_, active) => { customQueueActive = active }
 let autoplayChecked = false
 
 function ensureAutoplay() {
-  if (customQueueActive) return  // 커스텀 큐 활성 시 YouTube 자동재생 비활성화
-  if (autoplayChecked) return
   // 데스크톱 YouTube 자동재생 토글 버튼
   const toggleBtn = document.querySelector('.ytp-autonav-toggle-button')
-  if (toggleBtn) {
-    const isOn = toggleBtn.getAttribute('aria-checked') === 'true'
-    if (!isOn) {
-      toggleBtn.click()
-    }
-    autoplayChecked = true
+  if (!toggleBtn) return
+  const isOn = toggleBtn.getAttribute('aria-checked') === 'true'
+
+  if (customQueueActive) {
+    // 커스텀 큐 활성 시 YouTube 자동재생 강제 OFF — 우리 큐가 다음 곡 결정
+    if (isOn) toggleBtn.click()
+    return
   }
+
+  if (autoplayChecked) return
+  if (!isOn) toggleBtn.click()
+  autoplayChecked = true
 }
 
 function startObserving() {

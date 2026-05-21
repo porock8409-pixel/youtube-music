@@ -11,6 +11,7 @@ const http = require('http')
 app.commandLine.appendSwitch('disable-software-rasterizer')    // 소프트웨어 래스터라이저 비활성 (GPU 있으면 무관)
 app.commandLine.appendSwitch('disable-background-timer-throttling') // 백그라운드 타이머 유지 (음악 재생)
 app.commandLine.appendSwitch('disable-renderer-backgrounding')      // 렌더러 백그라운드 제한 해제
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required') // 메인창 hidden 상태에서도 첫 곡 자동재생 허용
 
 // ─── Simple Config Store ──────────────────────────────────
 
@@ -1193,11 +1194,24 @@ function sendFavoriteState(videoId) {
 
 function navigateToUrl(url) {
   if (!youtubeView || youtubeView.webContents.isDestroyed()) return
+  // 큐 모드 활성 시 YouTube 자체 list 자동재생 차단 — 우리 큐가 다음 곡을 결정
+  let cleanUrl = url
+  if (playlistQueueActive) {
+    cleanUrl = cleanUrl
+      .replace(/[?&]list=[^&]*/g, '')
+      .replace(/[?&]index=[^&]*/g, '')
+      .replace(/\?&/, '?')
+      .replace(/[?&]$/, '')
+  }
   // autoplay 파라미터 추가
-  const playUrl = url.includes('?') ? `${url}&autoplay=1` : `${url}?autoplay=1`
+  const playUrl = cleanUrl.includes('?') ? `${cleanUrl}&autoplay=1` : `${cleanUrl}?autoplay=1`
   youtubeView.webContents.loadURL(playUrl)
   // 로드 후 강제 재생 (YouTube가 autoplay를 무시하는 경우 대비)
   youtubeView.webContents.once('did-finish-load', () => {
+    // preload.js의 customQueueActive는 페이지 리로드로 false로 초기화됨 → 재동기화
+    if (youtubeView && !youtubeView.webContents.isDestroyed()) {
+      youtubeView.webContents.send('set-custom-queue', playlistQueueActive)
+    }
     const forcePlay = `
       (() => {
         const v = document.querySelector('video');
