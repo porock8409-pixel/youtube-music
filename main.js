@@ -578,6 +578,209 @@ function syncQueueIndex(videoId) {
   }
 }
 
+// ─── Library (일반 YouTube /feed/playlists 페이지 파싱) ───
+// 이미 로그인된 BrowserView(youtube.com) 세션을 그대로 활용 — 별도 OAuth 불필요.
+// 이 앱 사용자는 일반 YouTube 환경이므로 music.youtube.com이 아닌 youtube.com 라이브러리를 읽는다.
+// 페이지 HTML을 same-origin fetch → ytInitialData 정규식 추출 → 파싱.
+
+async function fetchYoutubePage(path) {
+  if (!youtubeView || youtubeView.webContents.isDestroyed()) {
+    return { ok: false, error: 'YouTube view not ready' }
+  }
+  const code = `
+    (async () => {
+      try {
+        const res = await fetch(${JSON.stringify(path)}, {
+          credentials: 'include',
+          headers: { 'Accept': 'text/html' }
+        });
+        if (!res.ok) return { ok: false, error: 'HTTP ' + res.status, status: res.status };
+        const html = await res.text();
+        const m = html.match(/var ytInitialData = (\\{[\\s\\S]*?\\});<\\/script>/);
+        if (!m) {
+          // 로그인 안 됐을 가능성
+          const loggedOut = /\\/accounts\\/SetSID|signin/i.test(html);
+          return { ok: false, error: loggedOut ? '로그인이 필요합니다' : 'ytInitialData not found' };
+        }
+        const data = JSON.parse(m[1]);
+        return { ok: true, data };
+      } catch (e) {
+        return { ok: false, error: String(e && e.message || e) };
+      }
+    })()
+  `
+  try {
+    const r = await youtubeView.webContents.executeJavaScript(code, true)
+    if (!r.ok) console.log('[library] fetch error (' + path + '):', JSON.stringify(r).slice(0, 300))
+    return r
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) }
+  }
+}
+
+// InnerTube 응답에서 특정 renderer 키를 가진 객체를 모두 수집 (재귀)
+function collectByKey(node, key, out = []) {
+  if (!node || typeof node !== 'object') return out
+  if (Array.isArray(node)) {
+    for (const item of node) collectByKey(item, key, out)
+    return out
+  }
+  if (node[key]) out.push(node[key])
+  for (const k of Object.keys(node)) collectByKey(node[k], key, out)
+  return out
+}
+
+function runsText(node) {
+  if (!node) return ''
+  if (typeof node === 'string') return node
+  if (node.simpleText) return node.simpleText
+  if (Array.isArray(node.runs)) return node.runs.map(r => r.text || '').join('')
+  return ''
+}
+
+function pickThumbnail(node) {
+  const thumbs = collectByKey(node, 'thumbnails')
+  for (const t of thumbs) {
+    if (Array.isArray(t) && t.length > 0) {
+      // 마지막 항목이 보통 가장 큼
+      const url = t[t.length - 1].url
+      if (url) return url
+    }
+  }
+  return ''
+}
+
+// /feed/playlists 페이지 ytInitialData에서 사용자 플레이리스트 카드 추출
+function parseLibraryPlaylistsHtml(data) {
+  const items = []
+  const seen = new Set()
+
+  // 신 UI: lockupViewModel (contentType=PLAYLIST)
+  for (const m of collectByKey(data, 'lockupViewModel')) {
+    if (m.contentType && m.contentType !== 'LOCKUP_CONTENT_TYPE_PLAYLIST') continue
+    const playlistId = m.contentId
+    if (!playlistId || seen.has(playlistId)) continue
+    const title =
+      m.metadata?.lockupMetadataViewModel?.title?.content ||
+      m.metadata?.lockupViewModelMetadata?.title?.content || ''
+    if (!title) continue
+    seen.add(playlistId)
+    const subtitle =
+      m.metadata?.lockupMetadataViewModel?.metadata?.contentMetadataViewModel
+        ?.metadataRows?.[0]?.metadataParts?.[0]?.text?.content || ''
+    items.push({
+      browseId: playlistId,
+      playlistId,
+      title,
+      subtitle,
+      thumbnail: pickThumbnail(m.contentImage || m),
+    })
+  }
+
+  if (items.length > 0) return items
+
+  // 구 UI fallback: gridPlaylistRenderer / playlistRenderer
+  const legacy = [
+    ...collectByKey(data, 'gridPlaylistRenderer'),
+    ...collectByKey(data, 'playlistRenderer'),
+  ]
+  for (const r of legacy) {
+    const playlistId =
+      r.playlistId ||
+      r.navigationEndpoint?.browseEndpoint?.browseId?.replace(/^VL/, '')
+    if (!playlistId || seen.has(playlistId)) continue
+    const title = runsText(r.title)
+    if (!title) continue
+    seen.add(playlistId)
+    const subtitle = r.videoCountShortText
+      ? runsText(r.videoCountShortText)
+      : r.shortBylineText
+        ? runsText(r.shortBylineText)
+        : ''
+    items.push({
+      browseId: playlistId,
+      playlistId,
+      title,
+      subtitle,
+      thumbnail: pickThumbnail(r.thumbnail || r.thumbnailRenderer || r),
+    })
+  }
+  return items
+}
+
+// /playlist?list=PLxxx 페이지 ytInitialData에서 곡 목록 추출
+function parsePlaylistSongsHtml(data) {
+  const results = []
+  const seen = new Set()
+
+  // 구 UI: playlistVideoRenderer (안정적, 보편적)
+  for (const v of collectByKey(data, 'playlistVideoRenderer')) {
+    const videoId = v.videoId
+    if (!videoId || seen.has(videoId)) continue
+    const title = runsText(v.title)
+    if (!title) continue
+    seen.add(videoId)
+    results.push({
+      videoId,
+      title,
+      artist: runsText(v.shortBylineText),
+      thumbnail: pickThumbnail(v.thumbnail) || `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
+      url: `https://www.youtube.com/watch?v=${videoId}`,
+    })
+  }
+
+  if (results.length > 0) return results
+
+  // 신 UI fallback: playlistVideoViewModel
+  for (const v of collectByKey(data, 'playlistVideoViewModel')) {
+    const videoId =
+      v.videoId ||
+      v.onTap?.innertubeCommand?.watchEndpoint?.videoId ||
+      collectByKey(v, 'watchEndpoint').map(w => w.videoId).find(Boolean)
+    if (!videoId || seen.has(videoId)) continue
+    const title =
+      v.title?.content ||
+      collectByKey(v.title, 'content').find(c => typeof c === 'string') || ''
+    if (!title) continue
+    seen.add(videoId)
+    const artist =
+      v.shortBylineText?.content ||
+      v.metadata?.shortBylineText?.content || ''
+    results.push({
+      videoId,
+      title,
+      artist,
+      thumbnail: pickThumbnail(v) || `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
+      url: `https://www.youtube.com/watch?v=${videoId}`,
+    })
+  }
+  return results
+}
+
+async function fetchLibraryPlaylists() {
+  const r = await fetchYoutubePage('/feed/playlists')
+  if (!r.ok) return { ok: false, error: r.error }
+  const items = parseLibraryPlaylistsHtml(r.data)
+  return { ok: true, items }
+}
+
+async function fetchPlaylistSongs(playlistId) {
+  if (!playlistId || typeof playlistId !== 'string') return { ok: false, error: 'invalid playlistId' }
+  const r = await fetchYoutubePage('/playlist?list=' + encodeURIComponent(playlistId))
+  if (!r.ok) return { ok: false, error: r.error }
+  const songs = parsePlaylistSongsHtml(r.data)
+  return { ok: true, songs }
+}
+
+async function importYouTubePlaylist(playlistId, name) {
+  const r = await fetchPlaylistSongs(playlistId)
+  if (!r.ok) return { ok: false, error: r.error }
+  if (!r.songs.length) return { ok: false, error: '곡을 찾을 수 없습니다' }
+  const pl = createPlaylist((name || '내 YouTube 플레이리스트').trim().slice(0, 50))
+  addBulkSongsToPlaylist(pl.id, r.songs)
+  return { ok: true, playlistId: pl.id, count: r.songs.length }
+}
+
 // ─── State ────────────────────────────────────────────────
 
 let mainWindow = null
@@ -2495,6 +2698,11 @@ ipcMain.on('playlist:import', () => importPlaylist())
 
 // 상태 요청
 ipcMain.on('playlist:get', () => broadcastPlaylistUpdate())
+
+// ─── YouTube 라이브러리 IPC ────────────────────────────────
+ipcMain.handle('library:get-playlists', async () => fetchLibraryPlaylists())
+ipcMain.handle('library:get-songs', async (_, browseId) => fetchPlaylistSongs(browseId))
+ipcMain.handle('library:import', async (_, { browseId, name }) => importYouTubePlaylist(browseId, name))
 
 // 하위 호환: 기존 queue:* → playlist:* 라우팅
 ipcMain.on('queue:add', (_, song) => {

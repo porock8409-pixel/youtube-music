@@ -642,6 +642,123 @@
     .queue-item:hover .queue-item-move { opacity: 1; }
     .queue-item-move span { cursor: pointer; }
     .queue-item-move span:hover { color: rgba(255,255,255,0.7); }
+
+    /* ─── 라이브러리 탭 ─── */
+    .lib-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      flex-shrink: 0;
+    }
+    .lib-back-btn {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.55);
+      cursor: pointer;
+      padding: 2px 4px;
+      display: none;
+      align-items: center;
+    }
+    .lib-back-btn.visible { display: flex; }
+    .lib-back-btn:hover { color: #fff; }
+    .lib-back-btn svg { width: 14px; height: 14px; fill: currentColor; }
+    .lib-title {
+      flex: 1;
+      font-size: 11px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.7);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .lib-refresh-btn, .lib-import-btn {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.45);
+      cursor: pointer;
+      padding: 3px 6px;
+      font-size: 10px;
+      border-radius: 4px;
+    }
+    .lib-refresh-btn:hover { color: rgba(255,255,255,0.85); }
+    .lib-import-btn {
+      background: rgba(255, 68, 68, 0.12);
+      color: #ff7a7a;
+      font-weight: 600;
+    }
+    .lib-import-btn:hover { background: rgba(255, 68, 68, 0.22); color: #fff; }
+    .lib-import-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .lib-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 0;
+    }
+    .lib-list::-webkit-scrollbar { width: 3px; }
+    .lib-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+    .lib-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .lib-item:hover { background: rgba(255,255,255,0.04); }
+    .lib-item-thumb {
+      width: 36px;
+      height: 36px;
+      border-radius: 4px;
+      background: #2a2a2a center/cover no-repeat;
+      flex-shrink: 0;
+    }
+    .lib-item-meta { flex: 1; min-width: 0; }
+    .lib-item-title {
+      font-size: 12px;
+      color: #fff;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .lib-item-sub {
+      font-size: 10px;
+      color: rgba(255,255,255,0.45);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      margin-top: 1px;
+    }
+    .lib-state {
+      padding: 24px 12px;
+      text-align: center;
+      font-size: 11px;
+      color: rgba(255,255,255,0.4);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .lib-state.error { color: #ff7a7a; }
+    .lib-song-item {
+      display: flex;
+      flex-direction: column;
+      padding: 4px 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+    }
+    .lib-song-title {
+      font-size: 11px;
+      color: rgba(255,255,255,0.92);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .lib-song-artist {
+      font-size: 10px;
+      color: rgba(255,255,255,0.45);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      margin-top: 1px;
+    }
   </style>
 </head>
 <body>
@@ -661,6 +778,9 @@
       </button>
       <button class="tab-btn" data-tab="search" title="검색">
         <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+      </button>
+      <button class="tab-btn" data-tab="library" title="내 라이브러리">
+        <svg viewBox="0 0 24 24"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8 11c-1.66 0-3-1.34-3-3s1.34-3 3-3c.35 0 .69.07 1 .18V6h5v2h-3v5c0 1.66-1.34 3-3 3zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6z"/></svg>
       </button>
     </div>
 
@@ -730,6 +850,21 @@
         <div class="search-empty">검색어를 입력하세요</div>
       </div>
     </div>
+
+    <!-- 라이브러리 탭 -->
+    <div class="tab-content" id="tab-library">
+      <div class="lib-header">
+        <button class="lib-back-btn" id="lib-back" title="뒤로">
+          <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+        </button>
+        <div class="lib-title" id="lib-title">내 라이브러리</div>
+        <button class="lib-import-btn" id="lib-import" style="display:none">내 플레이리스트로 import</button>
+        <button class="lib-refresh-btn" id="lib-refresh" title="새로고침">↻</button>
+      </div>
+      <div class="lib-list" id="lib-list">
+        <div class="lib-state">내 YouTube 플레이리스트를 자동으로 불러옵니다</div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -789,7 +924,126 @@
       if (tab === 'favorites') window.electronAPI.requestFavorites()
       if (tab === 'queue') window.electronAPI.requestPlaylists()
       if (tab === 'search') searchInput.focus()
+      if (tab === 'library' && libView === 'list' && libCache.length === 0) loadLibraryPlaylists()
     }
+
+    // ─── 라이브러리 탭 ──────────────────────────
+    const libList = document.getElementById('lib-list')
+    const libTitle = document.getElementById('lib-title')
+    const libBack = document.getElementById('lib-back')
+    const libRefresh = document.getElementById('lib-refresh')
+    const libImport = document.getElementById('lib-import')
+
+    let libView = 'list'   // 'list' | 'songs'
+    let libCache = []      // 플레이리스트 카드 캐시
+    let libCurrent = null  // 선택된 플레이리스트 { browseId, title }
+
+    function escapeHtml(s) {
+      return String(s || '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]))
+    }
+
+    function setLibState(text, isError) {
+      libList.innerHTML = `<div class="lib-state${isError ? ' error' : ''}">${escapeHtml(text)}</div>`
+    }
+
+    function renderPlaylistList(items) {
+      libCache = items
+      libView = 'list'
+      libTitle.textContent = '내 라이브러리'
+      libBack.classList.remove('visible')
+      libImport.style.display = 'none'
+      if (!items.length) {
+        setLibState('저장한 플레이리스트가 없습니다')
+        return
+      }
+      libList.innerHTML = items.map((p) => `
+        <div class="lib-item" data-browse="${escapeHtml(p.browseId)}" data-title="${escapeHtml(p.title)}">
+          <div class="lib-item-thumb" style="background-image:url('${escapeHtml(p.thumbnail)}')"></div>
+          <div class="lib-item-meta">
+            <div class="lib-item-title">${escapeHtml(p.title)}</div>
+            <div class="lib-item-sub">${escapeHtml(p.subtitle || '')}</div>
+          </div>
+        </div>
+      `).join('')
+      libList.querySelectorAll('.lib-item').forEach((el) => {
+        el.addEventListener('click', () => openPlaylistSongs(el.dataset.browse, el.dataset.title))
+      })
+    }
+
+    function renderSongList(songs) {
+      libView = 'songs'
+      libBack.classList.add('visible')
+      libImport.style.display = ''
+      libImport.disabled = !songs.length
+      libTitle.textContent = libCurrent?.title || '플레이리스트'
+      if (!songs.length) {
+        setLibState('곡을 가져오지 못했습니다')
+        return
+      }
+      libList.innerHTML = songs.map((s) => `
+        <div class="lib-song-item">
+          <div class="lib-song-title">${escapeHtml(s.title)}</div>
+          <div class="lib-song-artist">${escapeHtml(s.artist || '')}</div>
+        </div>
+      `).join('')
+    }
+
+    function formatLibError(r) {
+      if (!r) return '응답 없음'
+      let msg = r.error || '불러오기 실패'
+      if (r.body) msg += '\n' + r.body.slice(0, 150)
+      if (r.debug) msg += '\n[' + (r.debug.ctxClient || r.debug.clientName) + ' v' + r.debug.clientVersion + ', visitor=' + (r.debug.hasVisitorId ? 'Y' : 'N') + ']'
+      return msg
+    }
+
+    async function loadLibraryPlaylists() {
+      setLibState('불러오는 중...')
+      const r = await window.electronAPI.getLibraryPlaylists()
+      if (!r || !r.ok) {
+        setLibState(formatLibError(r), true)
+        return
+      }
+      renderPlaylistList(r.items || [])
+    }
+
+    async function openPlaylistSongs(browseId, title) {
+      libCurrent = { browseId, title }
+      libView = 'songs'
+      libBack.classList.add('visible')
+      libImport.style.display = ''
+      libImport.disabled = true
+      libTitle.textContent = title
+      setLibState('곡 목록 불러오는 중...')
+      const r = await window.electronAPI.getLibrarySongs(browseId)
+      if (!r || !r.ok) {
+        setLibState(r?.error || '곡을 불러오지 못했습니다', true)
+        libImport.disabled = true
+        return
+      }
+      renderSongList(r.songs || [])
+    }
+
+    libBack.addEventListener('click', () => renderPlaylistList(libCache))
+    libRefresh.addEventListener('click', () => {
+      if (libView === 'list') loadLibraryPlaylists()
+      else if (libCurrent) openPlaylistSongs(libCurrent.browseId, libCurrent.title)
+    })
+    libImport.addEventListener('click', async () => {
+      if (!libCurrent) return
+      libImport.disabled = true
+      const original = libImport.textContent
+      libImport.textContent = 'Import 중...'
+      const r = await window.electronAPI.importLibraryPlaylist(libCurrent.browseId, libCurrent.title)
+      libImport.textContent = original
+      if (!r || !r.ok) {
+        showToast(r?.error || 'Import 실패')
+        libImport.disabled = false
+        return
+      }
+      showToast(`'${libCurrent.title}' import 완료 (${r.count}곡)`)
+    })
 
     tabBtns.forEach(btn => {
       btn.addEventListener('click', () => switchTab(btn.dataset.tab))

@@ -1,6 +1,6 @@
 {
   "name": "youtube-music",
-  "version": "3.5.1",
+  "version": "3.6.0",
   "description": "YouTube Music Desktop App",
   "type": "commonjs",
   "main": "main.js",
@@ -10,7 +10,10 @@
     "build": "electron-builder",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
-    "build:dir": "electron-builder --dir"
+    "build:dir": "electron-builder --dir",
+    "copy-installer": "node scripts/copy-installer.mjs",
+    "release:win": "npm run build:win && npm run copy-installer",
+    "release:mac": "npm run build:mac && npm run copy-installer"
   },
   "author": "rockuen",
   "license": "MIT",

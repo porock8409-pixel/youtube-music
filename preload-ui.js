@@ -89,6 +89,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   importPlaylist: () => ipcRenderer.send('playlist:import'),
   requestPlaylists: () => ipcRenderer.send('playlist:get'),
 
+  // YouTube 라이브러리 (InnerTube)
+  getLibraryPlaylists: () => ipcRenderer.invoke('library:get-playlists'),
+  getLibrarySongs: (browseId) => ipcRenderer.invoke('library:get-songs', browseId),
+  importLibraryPlaylist: (browseId, name) => ipcRenderer.invoke('library:import', { browseId, name }),
+
   // 이벤트 수신
   onMaximized: (callback) => ipcRenderer.on('window:maximized', (_, val) => callback(val)),
   onMediaUpdate: (callback) => ipcRenderer.on('media:update', (_, data) => callback(data)),
