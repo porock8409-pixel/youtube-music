@@ -12,13 +12,15 @@ const ONEDRIVE_ROOT = process.env.OneDrive || process.env.ONEDRIVE || join(homed
 const DST = join(ONEDRIVE_ROOT, "Developed Apps", PROJECT);
 
 const VERSION = JSON.parse(readFileSync("package.json", "utf8")).version;
-const VERSION_TAG = `-${VERSION}.`;
+// 버전 뒤에 '.'(Windows: YouTube-Music-Setup-3.6.0.exe) 또는
+// '-'(Mac: YouTube-Music-3.6.0-arm64.dmg / YouTube Music-3.6.0-arm64-mac.zip)가 오는 산출물만.
+const VERSION_RE = new RegExp(`-${VERSION.replace(/\./g, "\\.")}[-.]`);
 
 function shouldCopy(name) {
-  // 메타데이터 (auto-updater)
+  // 메타데이터 (auto-updater: latest.yml / latest-mac.yml)
   if (/^latest.*\.yml$/i.test(name)) return true;
   // 현재 버전과 매칭되는 산출물만
-  if (!name.includes(VERSION_TAG)) return false;
+  if (!VERSION_RE.test(name)) return false;
   return /\.(exe|dmg|zip|blockmap)$/i.test(name);
 }
 
