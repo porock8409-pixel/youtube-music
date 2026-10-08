@@ -32,6 +32,8 @@ const lyricsBody = document.getElementById('lyrics-body')
 const lyricsSource = document.getElementById('lyrics-source')
 const btnLyrics = document.getElementById('btn-lyrics')
 let currentSyncedLyrics = null
+// 진행률은 0.5초마다 오지만 줄은 몇 초에 한 번 바뀐다 → 바뀔 때만 클래스/스크롤 갱신
+let lastActiveIndex = null
 
 window.electronAPI.onLyricsVisibility?.((visible) => {
   if (visible) {
@@ -44,6 +46,7 @@ window.electronAPI.onLyricsVisibility?.((visible) => {
 })
 
 window.electronAPI.onLyricsUpdate?.((data) => {
+  lastActiveIndex = null
   if (!data) {
     lyricsBody.innerHTML = '<div class="lyrics-placeholder">가사를 찾을 수 없습니다</div>'
     lyricsSource.textContent = ''
@@ -91,6 +94,9 @@ window.electronAPI.onMediaProgress?.((data) => {
       break
     }
   }
+
+  if (activeIndex === lastActiveIndex) return
+  lastActiveIndex = activeIndex
 
   const lines = lyricsBody.querySelectorAll('.lyrics-line')
   lines.forEach((el, i) => {

@@ -5,12 +5,12 @@ const fs = require('fs')
 const https = require('https')
 const http = require('http')
 
-// ─── Performance: 백그라운드 재생 유지 ──────────────────
+// ─── Performance ─────────────────────────────────────────
 // GPU 컴포지팅은 활성 상태 유지 (Windows/Mac 공통): 끄면 모든 페인트가 CPU로 떨어짐
 // V8 old space 기본값 사용: 128MB 제한은 YouTube 페이지에서 GC 쓰래싱 유발
+// 백그라운드 타이머/렌더러 제한은 풀지 않는다: 풀면 숨긴 창의 YouTube가 화면 없이도 계속 그린다.
+// 오디오 재생은 Chromium이 백그라운드에서도 유지한다 (createYoutubeView 참고)
 app.commandLine.appendSwitch('disable-software-rasterizer')    // 소프트웨어 래스터라이저 비활성 (GPU 있으면 무관)
-app.commandLine.appendSwitch('disable-background-timer-throttling') // 백그라운드 타이머 유지 (음악 재생)
-app.commandLine.appendSwitch('disable-renderer-backgrounding')      // 렌더러 백그라운드 제한 해제
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required') // 메인창 hidden 상태에서도 첫 곡 자동재생 허용
 
 // ─── Simple Config Store ──────────────────────────────────
@@ -921,11 +921,6 @@ if (!gotTheLock) {
       ]
       Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate))
     }
-
-    // 주기적 메모리 정리 (5분마다)
-    setInterval(() => {
-      if (global.gc) global.gc()
-    }, 5 * 60 * 1000)
   })
 
   // macOS: Dock/activate 클릭 시 미니 플레이어 표시
@@ -1012,8 +1007,15 @@ function createMainWindow() {
     }
   })
 
+  // 숨겨진 동안 진행률을 안 보냈으므로 마지막 값으로 맞춘다
+  mainWindow.on('show', () => {
+    if (lastProgress) mainWindow.webContents.send('media:progress', lastProgress)
+  })
+
   // 메인 창 복원 시 미니 플레이어 숨기기
+  // (렌더링 유지용으로 투명하게 띄울 때 최소화 상태였다면 showInactive가 복원시킨다 → 무시)
   mainWindow.on('restore', () => {
+    if (renderHold) return
     if (miniPlayerWindow && miniPlayerWindow.isVisible()) {
       miniPlayerWindow.hide()
       setConfig('miniPlayer.visible', false)
@@ -1060,7 +1062,8 @@ function createYoutubeView() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      backgroundThrottling: false,
+      // backgroundThrottling은 기본값(true) 유지: 메인창이 숨겨지면 페이지 렌더링·합성이 멈춘다
+      // (오디오는 계속, Chromium이 상황에 따라 영상 디코딩도 생략). YouTube에는 did-finish-load에서 visible로 위장
       spellcheck: false,
       enableWebSQL: false,
       v8CacheOptions: 'bypassHeatCheck'
@@ -1070,8 +1073,6 @@ function createYoutubeView() {
   // 백그라운드 오디오 유지
   youtubeView.webContents.setAudioMuted(false)
   youtubeView.webContents.setMaxListeners(20)
-  // 프레임 레이트 상한 30fps — 음악 플레이어 UI는 대부분 정적 (앨범아트/가사)이라 60fps 불필요
-  youtubeView.webContents.setFrameRate(30)
 
   mainWindow.setBrowserView(youtubeView)
   adjustYoutubeViewBoundsImmediate()
@@ -1151,7 +1152,11 @@ function createYoutubeView() {
   })
 
   // URL 추적
-  youtubeView.webContents.on('did-navigate', (_, url) => { currentUrl = url })
+  youtubeView.webContents.on('did-navigate', (_, url) => {
+    currentUrl = url
+    // 새 문서 — 재생이 시작될 때까지 그리게 둔다 (최대 15초, holdYoutubeRendering 참고)
+    holdYoutubeRendering(15000)
+  })
   youtubeView.webContents.on('did-navigate-in-page', (_, url) => { currentUrl = url })
 
   youtubeView.webContents.on('will-navigate', (e, url) => {
@@ -1744,6 +1749,17 @@ function buildSettingsSubmenu() {
     },
     { type: 'separator' },
     {
+      label: '음악 전용 모드 (영상 최저 화질)',
+      type: 'checkbox',
+      checked: getConfig('audioOnlyMode') !== false,
+      click: () => {
+        const val = !(getConfig('audioOnlyMode') !== false)
+        setConfig('audioOnlyMode', val)
+        sendToYoutube('set-audio-only', val)
+      }
+    },
+    { type: 'separator' },
+    {
       label: '실험적 기능',
       submenu: [
         {
@@ -1760,6 +1776,7 @@ function buildSettingsSubmenu() {
           click: () => {
             if (mainWindow) {
               if (process.platform === 'darwin') app.dock?.show()
+              releaseRenderHold({ keepVisible: true })
               mainWindow.show()
               if (mainWindow.isMinimized()) mainWindow.restore()
               mainWindow.focus()
@@ -1781,6 +1798,7 @@ function buildSettingsSubmenu() {
         }).then(({ response }) => {
           if (!loggedIn && response === 0 && mainWindow) {
             if (process.platform === 'darwin') app.dock?.show()
+            releaseRenderHold({ keepVisible: true })
             mainWindow.show()
             mainWindow.focus()
           }
@@ -1906,7 +1924,46 @@ ipcMain.on('media:metadata-changed', async (_, data) => {
   }
 })
 
-let rendererActivated = false
+// ─── 숨긴 YouTube 페이지: 로드~재생 시작까지만 그리기 ──────
+// 메인창이 숨겨져 있으면 페이지는 백그라운드(렌더링 중단)라 CPU를 거의 안 쓴다. 그런데 YouTube watch 페이지는
+// 그려져야 만들어지는 게 많다 — 숨긴 채 로드돼 한 번도 안 그려지면 플레이어가 안 생기거나, 곡 끝에서 다음 곡으로
+// 못 넘어가거나(getPlaylist()도 빔), 자동재생 토글이 반영되지 않는다(모두 실측).
+// 그래서 페이지를 로드할 때부터 재생이 시작되고 조금 뒤까지만 메인창을 투명·클릭 통과 상태로 띄워 그리게 하고,
+// 다시 숨겨 백그라운드로 보낸다. 한 번 그려진 페이지는 이후 같은 페이지 안의 곡 전환을 숨긴 채로도 해낸다.
+// (setBackgroundThrottling 토글만으로는 다시 백그라운드로 안 돌아간다 — 창을 실제로 숨겨야 함)
+let renderHold = null // { timer } — 투명하게 띄워 둔 동안만 존재
+
+function holdYoutubeRendering(ms) {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (!renderHold) {
+    if (mainWindow.isVisible()) return // 사용자가 보고 있음 — 이미 그려진다
+    renderHold = {}
+    mainWindow.setSkipTaskbar(true)       // 작업표시줄 버튼 깜빡임 방지
+    mainWindow.setIgnoreMouseEvents(true) // 투명한 창이 클릭을 가로채지 않게
+    mainWindow.setOpacity(0)
+    mainWindow.showInactive()
+  }
+  clearTimeout(renderHold.timer)
+  renderHold.timer = setTimeout(() => releaseRenderHold(), ms)
+}
+
+// keepVisible: 사용자가 메인창을 열 때 — 숨기지 않고 정상 창으로 되돌린다
+function releaseRenderHold({ keepVisible = false } = {}) {
+  if (!renderHold) return
+  clearTimeout(renderHold.timer)
+  renderHold = null
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (!keepVisible) mainWindow.hide()
+  mainWindow.setOpacity(1)
+  mainWindow.setIgnoreMouseEvents(false)
+  mainWindow.setSkipTaskbar(false)
+}
+
+// preload: 곡이 끝났는데 몇 초째 다음 곡으로 안 넘어감 (커스텀 큐가 아닐 때)
+ipcMain.on('media:stuck-at-end', () => {
+  console.log('[Playback] 곡 끝에서 멈춤 → 페이지 렌더링 활성화')
+  holdYoutubeRendering(3000)
+})
 
 ipcMain.on('media:state-changed', (_, data) => {
   currentMedia.isPlaying = data.isPlaying
@@ -1914,18 +1971,8 @@ ipcMain.on('media:state-changed', (_, data) => {
   if (miniPlayerWindow) {
     miniPlayerWindow.webContents.send('media:update', currentMedia)
   }
-  // 첫 재생 시 메인창을 투명하게 잠깐 표시 → BrowserView 렌더러 완전 활성화
-  if (data.isPlaying && !rendererActivated && mainWindow && !mainWindow.isDestroyed()) {
-    rendererActivated = true
-    mainWindow.setOpacity(0)
-    mainWindow.showInactive()
-    setTimeout(() => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.hide()
-        mainWindow.setOpacity(1)
-      }
-    }, 300)
-  }
+  // 로드 중 띄워 둔 상태면 재생 시작 2초 뒤 숨긴다 (플레이어/재생목록 초기화 여유)
+  if (data.isPlaying && renderHold) holdYoutubeRendering(2000)
 })
 
 ipcMain.on('media:ad-state', (_, data) => {
@@ -1950,11 +1997,16 @@ ipcMain.on('media:volume-changed', (_, data) => {
   }
 })
 
+// 0.5초마다 오는 진행률 — 메인창은 대부분 숨겨져 있으므로 보일 때만 보낸다.
+// 일시정지 중엔 진행률이 안 오므로, 다시 보일 때 마지막 값을 보낸다 (createMainWindow의 'show')
+let lastProgress = null
+
 ipcMain.on('media:progress', (_, data) => {
+  lastProgress = data
   if (miniPlayerWindow && !miniPlayerWindow.isDestroyed()) {
     miniPlayerWindow.webContents.send('media:progress', data)
   }
-  if (mainWindow && !mainWindow.isDestroyed()) {
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
     mainWindow.webContents.send('media:progress', data)
   }
   if (miniLyricsPopup && !miniLyricsPopup.isDestroyed()) {
@@ -1970,6 +2022,11 @@ ipcMain.on('media:playlist', (_, data) => {
   if (miniLyricsPopup && !miniLyricsPopup.isDestroyed()) {
     miniLyricsPopup.webContents.send('media:playlist', data)
   }
+})
+
+// preload가 페이지 시작 시 동기로 묻는다 (기본 ON)
+ipcMain.on('config:get-audio-only', (event) => {
+  event.returnValue = getConfig('audioOnlyMode') !== false
 })
 
 // 팝업에서 현재 재생 정보 요청
@@ -3415,6 +3472,7 @@ ipcMain.on('onboarding:login', () => {
   // 메인 창 표시하여 YouTube 로그인
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (process.platform === 'darwin') app.dock?.show()
+    releaseRenderHold({ keepVisible: true })
     mainWindow.show()
     mainWindow.focus()
   }

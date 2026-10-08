@@ -1,4 +1,83 @@
-const { ipcRenderer } = require('electron')
+const { ipcRenderer, contextBridge } = require('electron')
+
+// YouTube 플레이어 API(#movie_player의 메서드)와 페이지 전역은 메인 월드에만 있다.
+// preload는 격리 월드라 여기서 직접 만지면 YouTube 스크립트에 안 보인다 → executeInMainWorld로 실행
+let callPlayerWarned = false
+function callPlayer(func, ...args) {
+  try {
+    return contextBridge.executeInMainWorld({ func, args })
+  } catch (e) {
+    if (!callPlayerWarned) {
+      callPlayerWarned = true
+      console.warn('[ytm] 메인 월드 호출 실패:', e && e.message)
+    }
+    return null
+  }
+}
+
+// ─── 음악 전용 모드: 영상 화질을 가장 낮게 고정 ────────────
+// 화면에 안 보여도 영상은 계속 받고 디코딩된다 → 최저 화질로 디코딩·트래픽·버퍼 메모리를 줄인다
+let audioOnly = ipcRenderer.sendSync('config:get-audio-only') !== false
+
+// ─── AV1 차단 (document-start, 음악 전용 모드가 꺼져 있을 때만) ───
+// 영상을 제대로 볼 때 AV1 하드웨어 디코딩이 없는 PC(예: Ryzen 7730U의 Vega)에선 CPU가 소프트웨어로 디코딩한다
+// → VP9/H.264를 고르게 한다. 144p에선 소프트웨어 디코딩 비용이 무시할 수준이고 오히려 GPU 디코더 메모리(~70MB)를 아낀다(실측).
+// ⚠️ visible 위장(document.hidden)은 여기서 하지 않는다 — 로드 전부터 visible로 속이면, 창이 숨겨져
+//    렌더링이 멈춘 동안 YouTube가 다음 곡으로 넘어가지 못하고 끝에서 멈춘다(실측). 위장은 main.js의 did-finish-load에서.
+if (!audioOnly) {
+  callPlayer(() => {
+    const isAv1 = (type) => typeof type === 'string' && /av01/i.test(type)
+    if (window.MediaSource && MediaSource.isTypeSupported) {
+      const isTypeSupported = MediaSource.isTypeSupported.bind(MediaSource)
+      MediaSource.isTypeSupported = (type) => (isAv1(type) ? false : isTypeSupported(type))
+    }
+    const canPlayType = HTMLMediaElement.prototype.canPlayType
+    HTMLMediaElement.prototype.canPlayType = function (type) {
+      return isAv1(type) ? '' : canPlayType.call(this, type)
+    }
+    if (navigator.mediaCapabilities && navigator.mediaCapabilities.decodingInfo) {
+      const caps = navigator.mediaCapabilities
+      const decodingInfo = caps.decodingInfo.bind(caps)
+      caps.decodingInfo = (config) => (isAv1(config && config.video && config.video.contentType)
+        ? Promise.resolve({ supported: false, smooth: false, powerEfficient: false })
+        : decodingInfo(config))
+    }
+  })
+}
+
+// 곡마다 몇 번만 시도 — 광고·버퍼링 중엔 끝내 최저 화질로 안 보일 수 있어 2초마다 계속 바꾸지 않게
+const QUALITY_MAX_TRIES = 3
+let qualityTries = { videoId: '', count: 0 }
+
+function applyVideoQuality() {
+  if (!audioOnly) return
+  if (document.querySelector('.ad-showing, .ad-interrupting')) return // 광고 화질은 건드리지 않음 (시도 횟수도 아낌)
+  const videoId = getVideoId()
+  if (qualityTries.videoId !== videoId) qualityTries = { videoId, count: 0 }
+  if (qualityTries.count >= QUALITY_MAX_TRIES) return
+  const changed = callPlayer(() => {
+    const p = document.getElementById('movie_player')
+    if (!p || typeof p.getAvailableQualityLevels !== 'function') return false
+    const lowest = p.getAvailableQualityLevels().filter(q => q !== 'auto').pop()
+    if (!lowest || p.getPlaybackQuality() === lowest) return false
+    p.setPlaybackQualityRange(lowest, lowest)
+    return true
+  })
+  if (changed) qualityTries.count++
+}
+
+ipcRenderer.on('set-audio-only', (_, active) => {
+  audioOnly = active
+  qualityTries = { videoId: '', count: 0 }
+  if (active) {
+    applyVideoQuality()
+  } else {
+    callPlayer(() => {
+      const p = document.getElementById('movie_player')
+      if (p && typeof p.setPlaybackQualityRange === 'function') p.setPlaybackQualityRange('auto', 'auto')
+    })
+  }
+})
 
 // ─── Page Visibility API 우회 (최소화해도 재생 유지) ───
 
@@ -37,6 +116,7 @@ window.addEventListener('resize', () => {
 
 let lastTitle = ''
 let lastArtist = ''
+let lastVideoId = ''
 let lastIsPlaying = null
 
 // 데스크톱 YouTube 셀렉터
@@ -75,17 +155,33 @@ function queryFirst(selectors) {
 
 function getVideoId() {
   const url = window.location.href
-  const match = url.match(/[?&]v=([^&]+)/) || url.match(/\/watch\/([^?&]+)/)
+  const match = url.match(/[?&]v=([^&#]+)/) || url.match(/\/watch\/([^?&#]+)/)
   return match ? match[1] : ''
 }
 
-function extractMetadata() {
-  const titleEl = queryFirst(SEL.title)
-  const artistEl = queryFirst(SEL.artist)
+// 플레이어가 아는 현재 영상 정보. 숨긴 창에선 YouTube가 제목 DOM을 다시 그리지 않으므로 이쪽이 우선
+function readPlayerVideoData() {
+  return callPlayer(() => {
+    const p = document.getElementById('movie_player')
+    if (!p || typeof p.getVideoData !== 'function') return null
+    const d = p.getVideoData()
+    return d ? { videoId: d.video_id || '', title: d.title || '', author: d.author || '' } : null
+  })
+}
 
-  const title = titleEl?.textContent?.trim() || ''
-  const artist = artistEl?.textContent?.trim() || ''
+function extractMetadata() {
   const videoId = getVideoId()
+  let title, artist
+  const playerData = videoId ? readPlayerVideoData() : null
+  // 곡 전환 중(URL과 플레이어가 아직 다른 영상)이면 다음 주기에 다시 본다
+  if (playerData && playerData.videoId && playerData.videoId !== videoId) return
+  if (playerData && playerData.title) {
+    title = playerData.title.trim()
+    artist = playerData.author.trim()
+  } else {
+    title = queryFirst(SEL.title)?.textContent?.trim() || ''
+    artist = queryFirst(SEL.artist)?.textContent?.trim() || ''
+  }
 
   // 썸네일: videoId 기반 URL이 가장 확실 (SPA 네비게이션에서 og:image가 갱신 안 될 수 있음)
   let thumbnail = ''
@@ -93,9 +189,10 @@ function extractMetadata() {
     thumbnail = `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`
   }
 
-  if (title && (title !== lastTitle || artist !== lastArtist)) {
+  if (title && (title !== lastTitle || artist !== lastArtist || videoId !== lastVideoId)) {
     lastTitle = title
     lastArtist = artist
+    lastVideoId = videoId
     autoplayChecked = false // 곡이 바뀌면 자동재생 재확인
     ipcRenderer.send('media:metadata-changed', { title, artist, thumbnail, videoId })
   }
@@ -202,10 +299,15 @@ function attachVideoListeners() {
   video.addEventListener('ended', () => {
     if (customQueueActive) {
       ipcRenderer.send('media:ended')
+    } else {
+      watchStuckAtEnd(video)
     }
   })
   video.addEventListener('volumechange', () => emitVolumeState(video))
-  video.addEventListener('loadedmetadata', () => extractProgress())
+  video.addEventListener('loadedmetadata', () => {
+    extractProgress()
+    applyVideoQuality()
+  })
 
   // 진행률: timeupdate 이벤트 기반 (500ms throttle — 기존 0.5초 폴링과 동일한 빈도이지만 DOM 재쿼리 없음)
   let lastProgressSent = 0
@@ -222,6 +324,21 @@ function attachVideoListeners() {
     lastIsPlaying = true
     ipcRenderer.send('media:state-changed', { isPlaying: true })
   }
+}
+
+// ─── 곡 끝 안전망 ────────────────────────────────────────
+// 숨긴 창에서 YouTube가 곡 끝에서 다음 곡으로 못 넘어가는 경우가 있다 (한 번도 그려지지 않은 페이지).
+// 정상이면 끝나고 1초 안에 넘어가므로, 3초째 그대로면 main에 알려 페이지를 한 번 그리게 한다.
+// (YouTube가 끝난 영상을 0초로 되돌려 ended가 풀리기도 해서 paused로 본다 — 잘못 걸려도 3초 그리는 게 전부)
+let stuckAtEndTimer = null
+
+function watchStuckAtEnd(video) {
+  const endedUrl = location.href
+  clearTimeout(stuckAtEndTimer)
+  stuckAtEndTimer = setTimeout(() => {
+    if (customQueueActive || location.href !== endedUrl || !video.paused) return
+    ipcRenderer.send('media:stuck-at-end')
+  }, 3000)
 }
 
 // ─── 광고 자동 스킵 ──────────────────────────────────────
@@ -266,7 +383,13 @@ function skipAds() {
 
 // ─── 커스텀 큐 모드 (자동재생 제어) ─────────────────────────
 let customQueueActive = false
-ipcRenderer.on('set-custom-queue', (_, active) => { customQueueActive = active })
+// 숨겨진(안 그려진) 페이지에선 토글을 눌러도 aria-checked가 안 바뀐다 → 상태만 보고 계속 누르면
+// YouTube 자동재생이 켜짐/꺼짐을 오가다 켜진 채 곡 끝을 가로채 큐가 멈춘다(실측). 페이지당 한 번만 끈다
+let autonavOffClicked = false
+ipcRenderer.on('set-custom-queue', (_, active) => {
+  if (active !== customQueueActive) autonavOffClicked = false
+  customQueueActive = active
+})
 
 // ─── YouTube 자동재생 강제 활성화 ─────────────────────────
 let autoplayChecked = false
@@ -279,7 +402,10 @@ function ensureAutoplay() {
 
   if (customQueueActive) {
     // 커스텀 큐 활성 시 YouTube 자동재생 강제 OFF — 우리 큐가 다음 곡 결정
-    if (isOn) toggleBtn.click()
+    if (isOn && !autonavOffClicked) {
+      toggleBtn.click()
+      autonavOffClicked = true
+    }
     return
   }
 
@@ -299,6 +425,7 @@ function startObserving() {
     extractPlaylistInfo()
     skipAds()
     ensureAutoplay()
+    applyVideoQuality()
   }, 2000)
 
   // SPA 네비게이션 즉시 반응 — URL 변경 시 자동재생 플래그 리셋 + 메타 재검사

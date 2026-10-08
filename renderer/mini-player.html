@@ -172,12 +172,14 @@
       cursor: pointer;
     }
     .progress:hover { height: 6px; margin-top: 4px; }
+    /* 0.5초마다 1px 남짓 움직이므로 전환 애니메이션 없이 바로 반영 —
+       transition을 두면 갱신마다 0.4초씩 60fps로 창 전체를 다시 합성한다(실측: GPU 프로세스 CPU 대부분) */
     .progress-fill {
       height: 100%;
       background: #ff0000;
       border-radius: 2px;
-      width: 0%;
-      transition: width 0.4s linear;
+      transform: scaleX(0);
+      transform-origin: left center;
     }
 
     .opacity-toast {
@@ -563,6 +565,10 @@
             const duration = textWidth / marqueePxPerSec
             el.innerHTML = `<span class="marquee-inner" style="animation-duration:${duration}s">${text}${text}</span>`
             el.classList.add('overflows')
+            // 물리 픽셀 단위로만 이동 → 값이 안 바뀐 프레임은 다시 그리지 않는다 (느린 속도에선 프레임당 0.2px 남짓이라 매 프레임 합성하던 것)
+            const inner = el.firstElementChild
+            const devicePx = Math.round(inner.getBoundingClientRect().width / 2 * window.devicePixelRatio)
+            inner.style.animationTimingFunction = `steps(${Math.max(1, devicePx)})`
           }
         })
       })
@@ -668,12 +674,16 @@
 
     // 프로그레스 바
     window.electronAPI.onMediaProgress((data) => {
-      progressEl.style.width = data.percent + '%'
-      progressExEl.style.width = data.percent + '%'
+      const scale = `scaleX(${Math.min(100, Math.max(0, data.percent || 0)) / 100})`
+      progressEl.style.transform = scale
+      progressExEl.style.transform = scale
       mediaDuration = data.duration || 0
       mediaCurrentTime = data.currentTime || 0
-      timeCurrent.textContent = formatTime(data.currentTime)
-      timeTotal.textContent = formatTime(data.duration)
+      // 같은 문자열을 다시 넣어도 텍스트 노드가 교체돼 레이아웃이 다시 돈다
+      const cur = formatTime(data.currentTime)
+      const total = formatTime(data.duration)
+      if (timeCurrent.textContent !== cur) timeCurrent.textContent = cur
+      if (timeTotal.textContent !== total) timeTotal.textContent = total
     })
 
     // 프로그레스 바 클릭 (컴팩트)

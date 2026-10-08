@@ -879,6 +879,8 @@
     const tabContents = document.querySelectorAll('.tab-content')
 
     let syncedLyrics = null
+    // 진행률은 0.5초마다 오지만 줄은 몇 초에 한 번 바뀐다 → 바뀔 때만 클래스/스크롤 갱신
+    let lastActiveIndex = null
     let searchTimer = null
     let historyData = []
     let favoritesData = []
@@ -925,6 +927,7 @@
       if (tab === 'queue') window.electronAPI.requestPlaylists()
       if (tab === 'search') searchInput.focus()
       if (tab === 'library' && libView === 'list' && libCache.length === 0) loadLibraryPlaylists()
+      if (tab === 'lyrics') lastActiveIndex = null  // 숨겨진 동안 못 한 스크롤을 다음 진행률에서 다시
     }
 
     // ─── 라이브러리 탭 ──────────────────────────
@@ -1054,6 +1057,7 @@
 
     // ─── 가사 ────────────────────────────────────
     window.electronAPI.onLyricsUpdate((data) => {
+      lastActiveIndex = null
       if (!data) {
         lyricsBody.innerHTML = '<div class="lyrics-placeholder">가사를 찾을 수 없습니다</div>'
         syncedLyrics = null
@@ -1093,6 +1097,8 @@
       for (let i = syncedLyrics.length - 1; i >= 0; i--) {
         if (adjustedTime >= syncedLyrics[i].time) { activeIndex = i; break }
       }
+      if (activeIndex === lastActiveIndex) return
+      lastActiveIndex = activeIndex
       const lines = lyricsBody.querySelectorAll('.lyrics-line')
       lines.forEach((el, i) => {
         el.classList.remove('active', 'past')
